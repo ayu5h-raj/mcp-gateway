@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 )
 
@@ -136,5 +135,3 @@ func MustRaw(v any) json.RawMessage {
 	return b
 }
 
-// Keep strings import tidy if the package stops using it.
-var _ = strings.TrimSpace
