@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
@@ -96,7 +97,7 @@ func (a *Aggregator) RefreshAll(ctx context.Context) error {
 // RefreshTools rebuilds the merged tool list and emits a change callback.
 func (a *Aggregator) RefreshTools(ctx context.Context) error {
 	a.mu.RLock()
-	servers := maps(a.servers)
+	servers := snapshotServers(a.servers)
 	a.mu.RUnlock()
 
 	var merged []Tool
@@ -129,15 +130,21 @@ func (a *Aggregator) RefreshTools(ctx context.Context) error {
 // RefreshResources rebuilds the merged resource list.
 func (a *Aggregator) RefreshResources(ctx context.Context) error {
 	a.mu.RLock()
-	servers := maps(a.servers)
+	servers := snapshotServers(a.servers)
 	a.mu.RUnlock()
 
 	var merged []Resource
 	for prefix, c := range servers {
 		rs, err := c.ListResources(ctx)
 		if err != nil {
-			// Some servers don't support resources — treat "method not found" as empty.
-			continue
+			// Many MCP servers don't implement resources. "Method not found"
+			// (JSON-RPC -32601) is expected and ignored; any other error is
+			// propagated so a transient child failure doesn't silently zero
+			// the aggregated list.
+			if isMethodNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("aggregator: resources/list %s: %w", prefix, err)
 		}
 		for _, r := range rs {
 			merged = append(merged, Resource{
@@ -164,19 +171,23 @@ func (a *Aggregator) RefreshResources(ctx context.Context) error {
 // RefreshPrompts rebuilds the merged prompt list.
 func (a *Aggregator) RefreshPrompts(ctx context.Context) error {
 	a.mu.RLock()
-	servers := maps(a.servers)
+	servers := snapshotServers(a.servers)
 	a.mu.RUnlock()
 
 	var merged []Prompt
 	for prefix, c := range servers {
 		ps, err := c.ListPrompts(ctx)
 		if err != nil {
-			continue
+			// Same semantics as resources: tolerate unimplemented, propagate real errors.
+			if isMethodNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("aggregator: prompts/list %s: %w", prefix, err)
 		}
 		for _, p := range ps {
 			args := make([]PromptArgument, len(p.Arguments))
-			for i, a := range p.Arguments {
-				args[i] = PromptArgument{Name: a.Name, Description: a.Description, Required: a.Required}
+			for i, arg := range p.Arguments {
+				args[i] = PromptArgument{Name: arg.Name, Description: arg.Description, Required: arg.Required}
 			}
 			merged = append(merged, Prompt{
 				Name:        PrefixTool(prefix, p.Name),
@@ -293,10 +304,22 @@ func (a *Aggregator) OnPromptsChanged(cb func()) {
 	a.mu.Unlock()
 }
 
-func maps(m map[string]*mcpchild.Client) map[string]*mcpchild.Client {
+// snapshotServers returns a shallow copy of the servers map for
+// read-only iteration outside the RWMutex.
+func snapshotServers(m map[string]*mcpchild.Client) map[string]*mcpchild.Client {
 	cp := make(map[string]*mcpchild.Client, len(m))
 	for k, v := range m {
 		cp[k] = v
 	}
 	return cp
+}
+
+// isMethodNotFound reports whether err represents a JSON-RPC "method not found"
+// (code -32601). The mcpchild client formats errors as "<method>: <msg> (code <n>)",
+// so we match on the trailing numeric code fragment.
+func isMethodNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "code -32601")
 }
