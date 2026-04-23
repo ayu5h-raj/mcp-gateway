@@ -1,9 +1,12 @@
 package mcpchild
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,4 +80,126 @@ func TestClient_CallTool(t *testing.T) {
 	require.Len(t, res.Content, 1)
 	text, _ := res.Content[0].(map[string]any)["text"].(string)
 	assert.Contains(t, text, "ok:")
+}
+
+// TestClient_CallbackRace verifies no -race flag trips when callbacks are
+// registered shortly before/while notifications are being dispatched.
+func TestClient_CallbackRace(t *testing.T) {
+	tools := []fakechild.Tool{{Name: "t", InputSchema: fakechild.MustRaw(map[string]any{"type": "object"})}}
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	srv := fakechild.New(tools, nil)
+	go func() {
+		_ = srv.Serve(inR, outW)
+		_ = outW.Close()
+	}()
+	t.Cleanup(func() { _ = inW.Close() })
+
+	c := New("x", inW, outR)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, c.Initialize(ctx))
+
+	// Concurrently register callbacks from multiple goroutines.
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.OnToolsListChanged(func() {})
+			c.OnResourcesListChanged(func() {})
+			c.OnPromptsListChanged(func() {})
+			c.OnResourceUpdated(func(string) {})
+		}()
+	}
+	wg.Wait()
+}
+
+// TestClient_ConcurrentRequests verifies concurrent calls don't interleave
+// JSON-RPC frames on the wire.
+func TestClient_ConcurrentRequests(t *testing.T) {
+	tools := []fakechild.Tool{{Name: "t", InputSchema: fakechild.MustRaw(map[string]any{"type": "object"})}}
+	in, out, cleanup := newPipedChild(t, tools, nil)
+	defer cleanup()
+
+	c := New("x", in, out)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, c.Initialize(ctx))
+
+	const N = 40
+	errs := make(chan error, N)
+	for i := 0; i < N; i++ {
+		go func() {
+			_, err := c.ListTools(ctx)
+			errs <- err
+		}()
+	}
+	for i := 0; i < N; i++ {
+		select {
+		case err := <-errs:
+			require.NoError(t, err)
+		case <-ctx.Done():
+			t.Fatal("concurrent ListTools timed out")
+		}
+	}
+}
+
+// TestClient_ChildExitUnblocksInflight verifies that inflight requests fail
+// fast (rather than block forever) when the child process exits.
+//
+// We do NOT use fakechild here: fakechild responds to tools/list synchronously,
+// so the request would complete before outR.Close() is called and the drain
+// path would never be exercised. Instead we hand-roll a minimal child that
+// answers initialize and then silently consumes further frames without
+// replying — guaranteeing that ListTools is still blocked in its select when
+// we close the output pipe.
+func TestClient_ChildExitUnblocksInflight(t *testing.T) {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+
+	// Minimal child: answers initialize then swallows all subsequent frames.
+	go func() {
+		br := bufio.NewReader(inR)
+		line, err := br.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var req struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(line, &req)
+		resp := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{}}`+"\n", req.ID))
+		_, _ = outW.Write(resp)
+		// Drain input without responding — keeps ListTools waiting.
+		for {
+			if _, err := br.ReadBytes('\n'); err != nil {
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() { _ = inW.Close() })
+
+	c := New("x", inW, outR)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, c.Initialize(ctx))
+
+	// Fire a ListTools; while it's pending, simulate the child dying by
+	// closing the read end from outside.
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.ListTools(context.Background()) // non-cancelling!
+		done <- err
+	}()
+	// Give the call time to enter the select.
+	time.Sleep(100 * time.Millisecond)
+	_ = outR.Close() // simulate child process exit: readLoop hits EOF
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "inflight request must error when child exits")
+	case <-time.After(2 * time.Second):
+		t.Fatal("inflight request was not unblocked after child exit")
+	}
 }

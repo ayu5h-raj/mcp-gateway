@@ -56,11 +56,18 @@ type Client struct {
 	out io.ReadCloser
 	br  *bufio.Reader
 
-	nextID   atomic.Int64
+	nextID atomic.Int64
+
+	// mu protects inflight, closed, and all onXxx callback fields (C1, C2).
 	mu       sync.Mutex
 	inflight map[string]chan *rpcResp
+	closed   bool // set true when readLoop exits; guarded by mu
 
-	// notify callbacks (set via Subscribe* methods):
+	// writeMu serializes writes to c.in (C3). Separate from mu to avoid
+	// contention between the write path and the callback/inflight paths.
+	writeMu sync.Mutex
+
+	// notify callbacks (set via OnXxx methods, guarded by mu):
 	onToolsListChanged     func()
 	onResourcesListChanged func()
 	onPromptsListChanged   func()
@@ -167,16 +174,33 @@ func (c *Client) GetPrompt(ctx context.Context, name string, args map[string]str
 }
 
 // OnToolsListChanged registers a callback for tools/list_changed notifications.
-func (c *Client) OnToolsListChanged(cb func()) { c.onToolsListChanged = cb }
+// The callback is invoked from the readLoop goroutine; it must not block.
+func (c *Client) OnToolsListChanged(cb func()) {
+	c.mu.Lock()
+	c.onToolsListChanged = cb
+	c.mu.Unlock()
+}
 
 // OnResourcesListChanged registers a callback for resources/list_changed.
-func (c *Client) OnResourcesListChanged(cb func()) { c.onResourcesListChanged = cb }
+func (c *Client) OnResourcesListChanged(cb func()) {
+	c.mu.Lock()
+	c.onResourcesListChanged = cb
+	c.mu.Unlock()
+}
 
 // OnPromptsListChanged registers a callback for prompts/list_changed.
-func (c *Client) OnPromptsListChanged(cb func()) { c.onPromptsListChanged = cb }
+func (c *Client) OnPromptsListChanged(cb func()) {
+	c.mu.Lock()
+	c.onPromptsListChanged = cb
+	c.mu.Unlock()
+}
 
 // OnResourceUpdated registers a callback for resources/updated(uri).
-func (c *Client) OnResourceUpdated(cb func(uri string)) { c.onResourceUpdated = cb }
+func (c *Client) OnResourceUpdated(cb func(uri string)) {
+	c.mu.Lock()
+	c.onResourceUpdated = cb
+	c.mu.Unlock()
+}
 
 // Close shuts the client (pipes are owned by the supervisor).
 func (c *Client) Close() error { return nil }
@@ -205,12 +229,22 @@ type rpcErr struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+var errChildClosed = errors.New("mcp child closed")
+
 func (c *Client) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := fmt.Sprintf("%d", c.nextID.Add(1))
 	ch := make(chan *rpcResp, 1)
+
+	// C2 fix: check closed and insert into inflight atomically under mu so
+	// there is no race window between the closed-check and the map insertion.
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, errChildClosed
+	}
 	c.inflight[id] = ch
 	c.mu.Unlock()
+
 	defer func() {
 		c.mu.Lock()
 		delete(c.inflight, id)
@@ -221,7 +255,21 @@ func (c *Client) request(ctx context.Context, method string, params any) (json.R
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.in.Write(append(buf, '\n')); err != nil {
+
+	// C3 fix: serialize all writes through writeMu to prevent frame interleaving.
+	// Check closed again before writing — the child may have exited between the
+	// inflight registration and here.
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, errChildClosed
+	}
+	c.mu.Unlock()
+
+	c.writeMu.Lock()
+	_, err = c.in.Write(append(buf, '\n'))
+	c.writeMu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 
@@ -237,11 +285,22 @@ func (c *Client) request(ctx context.Context, method string, params any) (json.R
 }
 
 func (c *Client) notify(method string, params any) error {
+	// C2/C3 fix: check closed under mu before taking writeMu.
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return errChildClosed
+	}
+	c.mu.Unlock()
+
 	buf, err := json.Marshal(rpcReq{JSONRPC: "2.0", Method: method, Params: params})
 	if err != nil {
 		return err
 	}
+
+	c.writeMu.Lock()
 	_, err = c.in.Write(append(buf, '\n'))
+	c.writeMu.Unlock()
 	return err
 }
 
@@ -255,12 +314,25 @@ func (c *Client) readLoop() {
 			}
 		}
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			return
+			// TODO(logger): log non-EOF errors
+			break
 		}
 	}
+
+	// C2 fix: on exit, drain all inflight waiters so they aren't parked forever.
+	exitResp := &rpcResp{Error: &rpcErr{Code: -32000, Message: "mcp child exited"}}
+	c.mu.Lock()
+	c.closed = true
+	for id, ch := range c.inflight {
+		// Non-blocking send: the channel has buffer=1 and may already hold a
+		// response delivered by dispatch just before EOF.
+		select {
+		case ch <- exitResp:
+		default:
+		}
+		delete(c.inflight, id)
+	}
+	c.mu.Unlock()
 }
 
 func (c *Client) dispatch(r *rpcResp) {
@@ -273,27 +345,41 @@ func (c *Client) dispatch(r *rpcResp) {
 		}
 		return
 	}
-	// Notification from the child.
+
+	// C1 fix: snapshot callback under mu, then invoke outside the lock to avoid
+	// holding c.mu across user-provided callback code (deadlock risk).
 	switch r.Method {
 	case "notifications/tools/list_changed":
-		if c.onToolsListChanged != nil {
-			c.onToolsListChanged()
+		c.mu.Lock()
+		cb := c.onToolsListChanged
+		c.mu.Unlock()
+		if cb != nil {
+			cb()
 		}
 	case "notifications/resources/list_changed":
-		if c.onResourcesListChanged != nil {
-			c.onResourcesListChanged()
+		c.mu.Lock()
+		cb := c.onResourcesListChanged
+		c.mu.Unlock()
+		if cb != nil {
+			cb()
 		}
 	case "notifications/prompts/list_changed":
-		if c.onPromptsListChanged != nil {
-			c.onPromptsListChanged()
+		c.mu.Lock()
+		cb := c.onPromptsListChanged
+		c.mu.Unlock()
+		if cb != nil {
+			cb()
 		}
 	case "notifications/resources/updated":
-		if c.onResourceUpdated != nil {
+		c.mu.Lock()
+		cb := c.onResourceUpdated
+		c.mu.Unlock()
+		if cb != nil {
 			var p struct {
 				URI string `json:"uri"`
 			}
 			_ = json.Unmarshal(r.Params, &p)
-			c.onResourceUpdated(p.URI)
+			cb(p.URI)
 		}
 	}
 }
