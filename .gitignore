@@ -1,0 +1,21 @@
+# Binaries
+bin/
+/mcp-gateway
+
+# Test output
+*.out
+coverage.txt
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Build artifacts
+dist/
+
+# Local state
+.env
+.env.local
