@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -29,8 +30,8 @@ func newDaemonCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "daemon",
 		Short: "Run the mcp-gateway daemon (long-running)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("daemon: not yet implemented")
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return errors.New("daemon: not yet implemented")
 		},
 	}
 }
@@ -39,8 +40,8 @@ func newStdioCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stdio",
 		Short: "Run as a stdio bridge to the local daemon (spawn target for stdio-only clients)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("stdio: not yet implemented")
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return errors.New("stdio: not yet implemented")
 		},
 	}
 }
@@ -49,8 +50,8 @@ func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Print daemon status",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("status: not yet implemented")
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return errors.New("status: not yet implemented")
 		},
 	}
 }
