@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -33,7 +32,7 @@ func NewWatcher(path string) (*Watcher, error) {
 	// Watch the parent directory — renames emit CREATE on the new file in that dir.
 	dir := filepath.Dir(path)
 	if err := fsw.Add(dir); err != nil {
-		fsw.Close()
+		_ = fsw.Close()
 		return nil, fmt.Errorf("watch %s: %w", dir, err)
 	}
 	w := &Watcher{
@@ -133,5 +132,4 @@ func (w *Watcher) sendErr(err error) {
 	case w.errors <- err:
 	default:
 	}
-	_ = errors.Unwrap(err) // keep linter happy; we may do more later
 }

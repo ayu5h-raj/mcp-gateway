@@ -513,8 +513,12 @@ type Config struct {
 	Schema     string            `json:"$schema,omitempty"`
 	Version    int               `json:"version"`
 	Daemon     Daemon            `json:"daemon"`
-	McpServers map[string]Server `json:"mcpServers"`
+	MCPServers map[string]Server `json:"mcpServers"`
 }
+
+// Note: `MCPServers` uses the Go-idiomatic initialism-uppercase form; revive's
+// var-naming rule requires it. JSON tag stays `mcpServers` to match Claude
+// Desktop's schema shape.
 
 // Daemon groups daemon-scoped settings.
 type Daemon struct {
@@ -625,8 +629,8 @@ func TestParse_MinimalValid(t *testing.T) {
 	assert.Equal(t, 1, c.Version)
 	assert.Equal(t, 7823, c.Daemon.HTTPPort)
 	assert.Equal(t, "info", c.Daemon.LogLevel)
-	require.Contains(t, c.McpServers, "github")
-	gh := c.McpServers["github"]
+	require.Contains(t, c.MCPServers, "github")
+	gh := c.MCPServers["github"]
 	assert.Equal(t, "npx", gh.Command)
 	assert.Equal(t, []string{"-y", "@modelcontextprotocol/server-github"}, gh.Args)
 	assert.True(t, gh.Enabled)
@@ -644,7 +648,7 @@ func TestParse_StripsLineAndBlockComments(t *testing.T) {
 	c, err := Parse(strings.NewReader(in))
 	require.NoError(t, err)
 	assert.Equal(t, 1, c.Version)
-	assert.Empty(t, c.McpServers)
+	assert.Empty(t, c.MCPServers)
 }
 
 func TestParse_TolerantOfTrailingCommas(t *testing.T) {
@@ -655,7 +659,7 @@ func TestParse_TolerantOfTrailingCommas(t *testing.T) {
 	}`
 	c, err := Parse(strings.NewReader(in))
 	require.NoError(t, err)
-	assert.True(t, c.McpServers["fs"].Enabled)
+	assert.True(t, c.MCPServers["fs"].Enabled)
 }
 
 func TestParse_AppliesDefaults(t *testing.T) {
@@ -717,38 +721,21 @@ func Parse(r io.Reader) (*Config, error) {
 	}
 	// Strip JSONC comments and trailing commas → canonical JSON.
 	pure := jsonc.ToJSON(raw)
-	// Default values first, then overlay what the user set.
+	// Pre-populate with defaults. encoding/json only overwrites fields that
+	// appear in the input; absent fields keep their pre-Decode values, so
+	// omitting a field in config yields its default. Explicit zero values
+	// (e.g. child_restart_max_attempts: 0 meaning "never retry") are
+	// preserved verbatim — validate.go enforces allowed ranges.
 	c := &Config{
 		Version:    Version,
 		Daemon:     DefaultDaemon(),
-		McpServers: map[string]Server{},
+		MCPServers: map[string]Server{},
 	}
 	dec := json.NewDecoder(bytes.NewReader(pure))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(c); err != nil {
 		return nil, &FormatError{Err: fmt.Errorf("decode: %w", err)}
 	}
-	// Reapply daemon defaults for any zero-valued fields the user omitted
-	// (json.Decode overwrites our defaults with zero when fields are absent
-	// in a subobject).
-	d := c.Daemon
-	def := DefaultDaemon()
-	if d.HTTPPort == 0 {
-		d.HTTPPort = def.HTTPPort
-	}
-	if d.LogLevel == "" {
-		d.LogLevel = def.LogLevel
-	}
-	if d.EventBufferSize == 0 {
-		d.EventBufferSize = def.EventBufferSize
-	}
-	if d.ChildRestartBackoffMaxSeconds == 0 {
-		d.ChildRestartBackoffMaxSeconds = def.ChildRestartBackoffMaxSeconds
-	}
-	if d.ChildRestartMaxAttempts == 0 {
-		d.ChildRestartMaxAttempts = def.ChildRestartMaxAttempts
-	}
-	c.Daemon = d
 	return c, nil
 }
 
@@ -809,7 +796,7 @@ func validCfg() *Config {
 	return &Config{
 		Version: 1,
 		Daemon:  DefaultDaemon(),
-		McpServers: map[string]Server{
+		MCPServers: map[string]Server{
 			"ok": {Command: "echo", Enabled: true},
 		},
 	}
@@ -837,7 +824,7 @@ func TestValidate_RejectsInvalidPort(t *testing.T) {
 
 func TestValidate_RejectsEmptyCommand(t *testing.T) {
 	c := validCfg()
-	c.McpServers["bad"] = Server{Command: "", Enabled: true}
+	c.MCPServers["bad"] = Server{Command: "", Enabled: true}
 	err := Validate(c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bad")
@@ -846,10 +833,10 @@ func TestValidate_RejectsEmptyCommand(t *testing.T) {
 
 func TestValidate_RejectsEmptyPrefixWhenExplicit(t *testing.T) {
 	c := validCfg()
-	s := c.McpServers["ok"]
+	s := c.MCPServers["ok"]
 	// Explicit empty prefix is NOT allowed (collision footgun).
 	s.Prefix = "  "
-	c.McpServers["ok"] = s
+	c.MCPServers["ok"] = s
 	err := Validate(c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "prefix")
@@ -859,7 +846,7 @@ func TestValidate_RejectsDuplicatePrefix(t *testing.T) {
 	c := &Config{
 		Version: 1,
 		Daemon:  DefaultDaemon(),
-		McpServers: map[string]Server{
+		MCPServers: map[string]Server{
 			"a": {Command: "x", Enabled: true, Prefix: "dup"},
 			"b": {Command: "x", Enabled: true, Prefix: "dup"},
 		},
@@ -871,7 +858,7 @@ func TestValidate_RejectsDuplicatePrefix(t *testing.T) {
 
 func TestValidate_RejectsBadServerName(t *testing.T) {
 	c := validCfg()
-	c.McpServers["has space"] = Server{Command: "echo", Enabled: true}
+	c.MCPServers["has space"] = Server{Command: "echo", Enabled: true}
 	err := Validate(c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "name")
@@ -930,7 +917,7 @@ func Validate(c *Config) error {
 	}
 
 	seenPrefix := map[string]string{}
-	for name, s := range c.McpServers {
+	for name, s := range c.MCPServers {
 		if !validServerName.MatchString(name) {
 			return fmt.Errorf("server name %q invalid: must match [A-Za-z0-9_-]{1,64}", name)
 		}
@@ -1083,7 +1070,7 @@ func TestWatcher_EmitsInitialLoad(t *testing.T) {
 
 	select {
 	case cfg := <-w.Changes():
-		require.Contains(t, cfg.McpServers, "a")
+		require.Contains(t, cfg.MCPServers, "a")
 	case <-ctx.Done():
 		t.Fatal("no initial config received")
 	}
@@ -1109,7 +1096,7 @@ func TestWatcher_EmitsOnChange(t *testing.T) {
 	defer cancel()
 	select {
 	case cfg := <-w.Changes():
-		assert.Contains(t, cfg.McpServers, "b")
+		assert.Contains(t, cfg.MCPServers, "b")
 	case <-ctx.Done():
 		t.Fatal("no change emitted after rename")
 	}
@@ -1143,7 +1130,6 @@ go test ./internal/config/ -run TestWatcher -v
 package config
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -1175,7 +1161,7 @@ func NewWatcher(path string) (*Watcher, error) {
 	// Watch the parent directory — renames emit CREATE on the new file in that dir.
 	dir := filepath.Dir(path)
 	if err := fsw.Add(dir); err != nil {
-		fsw.Close()
+		_ = fsw.Close()
 		return nil, fmt.Errorf("watch %s: %w", dir, err)
 	}
 	w := &Watcher{
@@ -1275,7 +1261,6 @@ func (w *Watcher) sendErr(err error) {
 	case w.errors <- err:
 	default:
 	}
-	_ = errors.Unwrap(err) // keep linter happy; we may do more later
 }
 ```
 
@@ -3757,7 +3742,7 @@ func (d *Daemon) reconcile(ctx context.Context, cfg *config.Config) {
 	d.cfg = cfg
 
 	wanted := map[string]struct{}{}
-	for name, s := range cfg.McpServers {
+	for name, s := range cfg.MCPServers {
 		if !s.Enabled {
 			continue
 		}
@@ -3794,7 +3779,7 @@ func (d *Daemon) reconcile(ctx context.Context, cfg *config.Config) {
 			d.agg.RemoveServer(prefix)
 			delete(d.clients, prefix)
 			// Supervisor: find server by matching prefix → name mapping.
-			for name, s := range cfg.McpServers {
+			for name, s := range cfg.MCPServers {
 				if config.EffectivePrefix(name, s) == prefix {
 					d.sup.Remove(name)
 				}
@@ -3957,7 +3942,7 @@ func (d *Daemon) reattach(ctx context.Context) {
 	// but don't yet have a client.
 	type want struct{ name, prefix string }
 	var toAttach []want
-	for name, s := range cfg.McpServers {
+	for name, s := range cfg.MCPServers {
 		if !s.Enabled {
 			continue
 		}

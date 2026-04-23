@@ -19,38 +19,21 @@ func Parse(r io.Reader) (*Config, error) {
 	}
 	// Strip JSONC comments and trailing commas → canonical JSON.
 	pure := jsonc.ToJSON(raw)
-	// Default values first, then overlay what the user set.
+	// Pre-populate with defaults. encoding/json only overwrites fields that
+	// appear in the input; absent fields keep their pre-Decode values, so
+	// omitting a field in config yields its default. Explicit zero values
+	// (e.g. child_restart_max_attempts: 0 meaning "never retry") are
+	// preserved verbatim — validate.go enforces allowed ranges.
 	c := &Config{
 		Version:    Version,
 		Daemon:     DefaultDaemon(),
-		McpServers: map[string]Server{},
+		MCPServers: map[string]Server{},
 	}
 	dec := json.NewDecoder(bytes.NewReader(pure))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(c); err != nil {
 		return nil, &FormatError{Err: fmt.Errorf("decode: %w", err)}
 	}
-	// Reapply daemon defaults for any zero-valued fields the user omitted
-	// (json.Decode overwrites our defaults with zero when fields are absent
-	// in a subobject).
-	d := c.Daemon
-	def := DefaultDaemon()
-	if d.HTTPPort == 0 {
-		d.HTTPPort = def.HTTPPort
-	}
-	if d.LogLevel == "" {
-		d.LogLevel = def.LogLevel
-	}
-	if d.EventBufferSize == 0 {
-		d.EventBufferSize = def.EventBufferSize
-	}
-	if d.ChildRestartBackoffMaxSeconds == 0 {
-		d.ChildRestartBackoffMaxSeconds = def.ChildRestartBackoffMaxSeconds
-	}
-	if d.ChildRestartMaxAttempts == 0 {
-		d.ChildRestartMaxAttempts = def.ChildRestartMaxAttempts
-	}
-	c.Daemon = d
 	return c, nil
 }
 

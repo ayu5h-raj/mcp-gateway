@@ -25,8 +25,8 @@ func TestParse_MinimalValid(t *testing.T) {
 	assert.Equal(t, 1, c.Version)
 	assert.Equal(t, 7823, c.Daemon.HTTPPort)
 	assert.Equal(t, "info", c.Daemon.LogLevel)
-	require.Contains(t, c.McpServers, "github")
-	gh := c.McpServers["github"]
+	require.Contains(t, c.MCPServers, "github")
+	gh := c.MCPServers["github"]
 	assert.Equal(t, "npx", gh.Command)
 	assert.Equal(t, []string{"-y", "@modelcontextprotocol/server-github"}, gh.Args)
 	assert.True(t, gh.Enabled)
@@ -44,7 +44,7 @@ func TestParse_StripsLineAndBlockComments(t *testing.T) {
 	c, err := Parse(strings.NewReader(in))
 	require.NoError(t, err)
 	assert.Equal(t, 1, c.Version)
-	assert.Empty(t, c.McpServers)
+	assert.Empty(t, c.MCPServers)
 }
 
 func TestParse_TolerantOfTrailingCommas(t *testing.T) {
@@ -55,7 +55,7 @@ func TestParse_TolerantOfTrailingCommas(t *testing.T) {
 	}`
 	c, err := Parse(strings.NewReader(in))
 	require.NoError(t, err)
-	assert.True(t, c.McpServers["fs"].Enabled)
+	assert.True(t, c.MCPServers["fs"].Enabled)
 }
 
 func TestParse_AppliesDefaults(t *testing.T) {

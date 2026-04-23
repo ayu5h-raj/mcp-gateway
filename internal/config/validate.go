@@ -31,7 +31,7 @@ func Validate(c *Config) error {
 	}
 
 	seenPrefix := map[string]string{}
-	for name, s := range c.McpServers {
+	for name, s := range c.MCPServers {
 		if !validServerName.MatchString(name) {
 			return fmt.Errorf("server name %q invalid: must match [A-Za-z0-9_-]{1,64}", name)
 		}

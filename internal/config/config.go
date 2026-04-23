@@ -14,7 +14,7 @@ type Config struct {
 	Schema     string            `json:"$schema,omitempty"`
 	Version    int               `json:"version"`
 	Daemon     Daemon            `json:"daemon"`
-	McpServers map[string]Server `json:"mcpServers"`
+	MCPServers map[string]Server `json:"mcpServers"`
 }
 
 // Daemon groups daemon-scoped settings.

@@ -11,7 +11,7 @@ func validCfg() *Config {
 	return &Config{
 		Version: 1,
 		Daemon:  DefaultDaemon(),
-		McpServers: map[string]Server{
+		MCPServers: map[string]Server{
 			"ok": {Command: "echo", Enabled: true},
 		},
 	}
@@ -39,7 +39,7 @@ func TestValidate_RejectsInvalidPort(t *testing.T) {
 
 func TestValidate_RejectsEmptyCommand(t *testing.T) {
 	c := validCfg()
-	c.McpServers["bad"] = Server{Command: "", Enabled: true}
+	c.MCPServers["bad"] = Server{Command: "", Enabled: true}
 	err := Validate(c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bad")
@@ -48,10 +48,10 @@ func TestValidate_RejectsEmptyCommand(t *testing.T) {
 
 func TestValidate_RejectsEmptyPrefixWhenExplicit(t *testing.T) {
 	c := validCfg()
-	s := c.McpServers["ok"]
+	s := c.MCPServers["ok"]
 	// Explicit empty prefix is NOT allowed (collision footgun).
 	s.Prefix = "  "
-	c.McpServers["ok"] = s
+	c.MCPServers["ok"] = s
 	err := Validate(c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "prefix")
@@ -61,7 +61,7 @@ func TestValidate_RejectsDuplicatePrefix(t *testing.T) {
 	c := &Config{
 		Version: 1,
 		Daemon:  DefaultDaemon(),
-		McpServers: map[string]Server{
+		MCPServers: map[string]Server{
 			"a": {Command: "x", Enabled: true, Prefix: "dup"},
 			"b": {Command: "x", Enabled: true, Prefix: "dup"},
 		},
@@ -73,7 +73,7 @@ func TestValidate_RejectsDuplicatePrefix(t *testing.T) {
 
 func TestValidate_RejectsBadServerName(t *testing.T) {
 	c := validCfg()
-	c.McpServers["has space"] = Server{Command: "echo", Enabled: true}
+	c.MCPServers["has space"] = Server{Command: "echo", Enabled: true}
 	err := Validate(c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "name")

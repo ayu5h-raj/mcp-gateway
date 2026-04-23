@@ -38,7 +38,7 @@ func TestWatcher_EmitsInitialLoad(t *testing.T) {
 
 	select {
 	case cfg := <-w.Changes():
-		require.Contains(t, cfg.McpServers, "a")
+		require.Contains(t, cfg.MCPServers, "a")
 	case <-ctx.Done():
 		t.Fatal("no initial config received")
 	}
@@ -64,7 +64,7 @@ func TestWatcher_EmitsOnChange(t *testing.T) {
 	defer cancel()
 	select {
 	case cfg := <-w.Changes():
-		assert.Contains(t, cfg.McpServers, "b")
+		assert.Contains(t, cfg.MCPServers, "b")
 	case <-ctx.Done():
 		t.Fatal("no change emitted after rename")
 	}
