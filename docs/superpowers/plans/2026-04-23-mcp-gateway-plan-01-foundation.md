@@ -158,7 +158,7 @@ git commit -m "chore: initialize Go module"
 - [ ] **Step 1:** Create `Makefile` with the following exact content:
 
 ```makefile
-.PHONY: build test lint vet fmt tidy clean e2e
+.PHONY: build install test cover lint vet fmt tidy clean e2e
 
 BINARY := mcp-gateway
 PKG := github.com/ayushraj/mcp-gateway

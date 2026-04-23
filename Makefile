@@ -1,4 +1,4 @@
-.PHONY: build test lint vet fmt tidy clean e2e
+.PHONY: build install test cover lint vet fmt tidy clean e2e
 
 BINARY := mcp-gateway
 PKG := github.com/ayushraj/mcp-gateway
