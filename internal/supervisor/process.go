@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 // SpawnConfig describes how to launch a child process.
@@ -45,6 +46,22 @@ func Spawn(ctx context.Context, sc SpawnConfig) (*Process, error) {
 
 	// Own process group; allows Kill to signal the whole tree.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Override the default CommandContext.Cancel (which SIGKILLs the direct
+	// child PID only). Signal the whole process group instead so grandchildren
+	// (e.g. the node process `npx` spawns) are killed too.
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		pgid, err := syscall.Getpgid(cmd.Process.Pid)
+		if err != nil {
+			pgid = cmd.Process.Pid
+		}
+		return syscall.Kill(-pgid, syscall.SIGKILL)
+	}
+	// Bound cmd.Wait if the child exits but a grandchild keeps stdout open.
+	cmd.WaitDelay = 5 * time.Second
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

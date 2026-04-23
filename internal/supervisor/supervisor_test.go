@@ -69,3 +69,63 @@ func TestSupervisor_RemoveKillsServer(t *testing.T) {
 	s.Remove("ok")
 	waitState(t, s, "ok", StateStopped, 2*time.Second)
 }
+
+func TestSupervisor_RestartsOnSpecChange(t *testing.T) {
+	s, cancel := mustStart(t)
+	defer cancel()
+	s.Set("x", ServerSpec{
+		Name:    "x",
+		Command: "sh",
+		Args:    []string{"-c", "cat"},
+	})
+	waitState(t, s, "x", StateRunning, 2*time.Second)
+	first := s.Process("x")
+	require.NotNil(t, first)
+
+	// Change spec; supervisor must kill old proc and start a new one.
+	s.Set("x", ServerSpec{
+		Name:    "x",
+		Command: "sh",
+		Args:    []string{"-c", "sleep 60; cat"},
+	})
+	// Wait until the process object changes (proves a new spawn happened).
+	deadline := time.Now().Add(4 * time.Second)
+	var second *Process
+	for time.Now().Before(deadline) {
+		second = s.Process("x")
+		if second != nil && second != first {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	require.NotNil(t, second, "expected new process after spec change")
+	assert.NotSame(t, first, second, "process pointer should change after spec change")
+	waitState(t, s, "x", StateRunning, 2*time.Second)
+}
+
+func TestSupervisor_BackoffHonoredAcrossUnrelatedWakes(t *testing.T) {
+	// Regression: a wake() from an unrelated Set must NOT short-circuit
+	// the backoff window for a server currently in StateErrored.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := New(SupervisorOpts{LogDir: t.TempDir(), MaxRestartAttempts: 10, BackoffMaxSeconds: 60})
+	go s.Run(ctx)
+
+	// Fails-to-start-ever server; first retry scheduled at ~now+1s.
+	s.Set("bad", ServerSpec{Name: "bad", Command: "sh", Args: []string{"-c", "exit 1"}})
+	waitState(t, s, "bad", StateErrored, 2*time.Second)
+	before := s.Status("bad").RestartCount
+
+	// Unrelated Set/Remove burst — each wakes the reconcile loop.
+	for i := 0; i < 5; i++ {
+		s.Set("noise", ServerSpec{Name: "noise", Command: "sh", Args: []string{"-c", "cat"}})
+		s.Remove("noise")
+	}
+	// Restart count must not have jumped by more than 1 during the first ~500ms
+	// (the backoff window is ~1s).
+	time.Sleep(500 * time.Millisecond)
+	snap := s.Status("bad")
+	assert.LessOrEqual(t, snap.RestartCount-before, 1,
+		"backoff window was defeated: restart count jumped from %d to %d under unrelated wakeups",
+		before, snap.RestartCount)
+}

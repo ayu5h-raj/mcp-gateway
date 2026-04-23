@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"sync"
 	"time"
@@ -48,16 +47,16 @@ type server struct {
 	spec    ServerSpec
 	desired bool // true = should be running; false = user removed it
 
-	state    State
-	restarts int
-	started  time.Time
-	lastErr  error
+	state       State
+	restarts    int
+	started     time.Time
+	lastErr     error
+	nextStartAt time.Time // earliest permissible restart time; zero = immediate
 
 	proc   *Process
 	cancel context.CancelFunc
 
 	backoff *Backoff
-	done    chan struct{}
 }
 
 // New creates a Supervisor. It is not started until you call Run.
@@ -178,6 +177,8 @@ func (s *Supervisor) reconcile(ctx context.Context) {
 	s.mu.Lock()
 	var toStart []string
 	var toKill []string
+	var earliest time.Time
+	now := time.Now()
 	for name, srv := range s.servers {
 		switch {
 		case !srv.desired && srv.proc == nil && srv.state != StateStopped:
@@ -186,9 +187,14 @@ func (s *Supervisor) reconcile(ctx context.Context) {
 			toKill = append(toKill, name)
 		case srv.desired && srv.state == StateDisabled:
 			// stay disabled; user must explicitly re-set
-		case srv.desired && srv.proc == nil && srv.state != StateStopped && srv.state != StateStarting:
-			toStart = append(toStart, name)
-		case srv.desired && srv.proc == nil && srv.state == StateStopped:
+		case srv.desired && srv.proc == nil && srv.state != StateStarting:
+			// Respect backoff: only start when the server's nextStartAt has arrived.
+			if !srv.nextStartAt.IsZero() && now.Before(srv.nextStartAt) {
+				if earliest.IsZero() || srv.nextStartAt.Before(earliest) {
+					earliest = srv.nextStartAt
+				}
+				continue
+			}
 			toStart = append(toStart, name)
 		case srv.desired && srv.state == StateRestarting && srv.proc != nil:
 			toKill = append(toKill, name)
@@ -201,6 +207,23 @@ func (s *Supervisor) reconcile(ctx context.Context) {
 	}
 	for _, n := range toStart {
 		s.startServer(ctx, n)
+	}
+
+	// If at least one server is waiting out a backoff window, schedule a wake
+	// for the earliest deadline so a spurious wake() doesn't defeat the wait.
+	if !earliest.IsZero() {
+		d := time.Until(earliest)
+		if d > 0 {
+			go func() {
+				t := time.NewTimer(d)
+				defer t.Stop()
+				select {
+				case <-t.C:
+					s.wake()
+				case <-ctx.Done():
+				}
+			}()
+		}
 	}
 }
 
@@ -232,21 +255,14 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 		srv.restarts++
 		if srv.restarts >= s.opts.MaxRestartAttempts {
 			srv.state = StateDisabled
+			srv.nextStartAt = time.Time{}
 			s.mu.Unlock()
 			return
 		}
-		// schedule backoff retry via wake after sleep
 		d := srv.backoff.Next()
+		srv.nextStartAt = time.Now().Add(d)
 		s.mu.Unlock()
-		go func() {
-			t := time.NewTimer(d)
-			defer t.Stop()
-			select {
-			case <-t.C:
-				s.wake()
-			case <-parentCtx.Done():
-			}
-		}()
+		s.wake()
 		return
 	}
 
@@ -255,6 +271,7 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 	srv.cancel = cancel
 	srv.started = time.Now()
 	srv.state = StateRunning
+	srv.nextStartAt = time.Time{}
 	s.mu.Unlock()
 
 	// Watch for exit.
@@ -273,26 +290,26 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 			s.wake()
 			return
 		}
+		// If the process ran long enough to be considered stable, reset the
+		// restart counter so transient later failures don't accumulate.
+		if time.Since(srv.started) > 30*time.Second {
+			srv.restarts = 0
+			srv.backoff.Reset()
+		}
 		// Unexpected exit.
 		srv.lastErr = waitErr
 		srv.restarts++
 		if srv.restarts >= s.opts.MaxRestartAttempts {
 			srv.state = StateDisabled
+			srv.nextStartAt = time.Time{}
 			s.mu.Unlock()
 			return
 		}
 		srv.state = StateErrored
 		d := srv.backoff.Next()
+		srv.nextStartAt = time.Now().Add(d)
 		s.mu.Unlock()
-		go func() {
-			t := time.NewTimer(d)
-			defer t.Stop()
-			select {
-			case <-t.C:
-				s.wake()
-			case <-parentCtx.Done():
-			}
-		}()
+		s.wake()
 	}()
 }
 
@@ -325,20 +342,21 @@ func (s *Supervisor) shutdownAll() {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		s.mu.Lock()
-		any := false
+		remaining := false
 		for _, srv := range s.servers {
 			if srv.proc != nil {
-				any = true
+				remaining = true
 				break
 			}
 		}
 		s.mu.Unlock()
-		if !any {
+		if !remaining {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	_ = errors.New("shutdown timed out") // placeholder for logger injection later
+	// TODO(logger): inject *slog.Logger on SupervisorOpts and log a shutdown
+	// timeout here (some children may still be running in their process groups).
 }
 
 func specEqual(a, b ServerSpec) bool {
