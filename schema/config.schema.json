@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ayushraj/mcp-gateway/main/schema/config.schema.json",
+  "title": "mcp-gateway config",
+  "type": "object",
+  "required": ["version", "mcpServers"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "integer", "const": 1 },
+    "daemon": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "http_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "log_level": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+        "event_buffer_size": { "type": "integer", "minimum": 100 },
+        "child_restart_backoff_max_seconds": { "type": "integer", "minimum": 1 },
+        "child_restart_max_attempts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "mcpServers": {
+      "type": "object",
+      "patternProperties": {
+        "^[A-Za-z0-9_-]{1,64}$": {
+          "type": "object",
+          "required": ["command"],
+          "additionalProperties": false,
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "env":  { "type": "object", "additionalProperties": { "type": "string" } },
+            "enabled": { "type": "boolean" },
+            "prefix": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
