@@ -15,12 +15,38 @@ linters:
     - gocritic
     - revive
     - misspell
+  settings:
+    revive:
+      # Drop the noisy doc-comment rules; they fire on every exported method
+      # of an internal Daemon-implements-admin.Daemon shim. Stutter check
+      # disabled — supervisor.SupervisorOpts is a v0.1 API, breaking
+      # rename queued for a later cleanup.
+      rules:
+        - name: var-naming
+        - name: error-return
+        - name: error-naming
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unused-parameter
+          arguments:
+            - allowRegex: "^_"
+        - name: unreachable-code
+        - name: empty-block
+        - name: indent-error-flow
+        - name: if-return
   exclusions:
     rules:
       - path: _test\.go
         linters:
           - errcheck
           - gocritic
+          - revive
 
 formatters:
   enable:

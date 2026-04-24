@@ -37,7 +37,7 @@ func newMockDaemon() *mockDaemon {
 	return &mockDaemon{bus: event.New(64)}
 }
 
-func (m *mockDaemon) Status() Status { return m.status }
+func (m *mockDaemon) Status() Status        { return m.status }
 func (m *mockDaemon) Servers() []ServerInfo { return m.servers }
 func (m *mockDaemon) Server(n string) (ServerInfo, bool) {
 	for _, s := range m.servers {

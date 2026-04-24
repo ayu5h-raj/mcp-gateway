@@ -73,7 +73,7 @@ func Spawn(ctx context.Context, sc SpawnConfig) (*Process, error) {
 	}
 
 	// stderr → file if requested; otherwise discard (we don't want to flood daemon output).
-	var stderrWriter io.Writer = io.Discard
+	var stderrWriter io.Writer = io.Discard //nolint:staticcheck // explicit interface type for clarity
 	var stderrFile *os.File
 	if sc.StderrPath != "" {
 		f, err := os.OpenFile(sc.StderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)

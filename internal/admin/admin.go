@@ -271,9 +271,6 @@ func appendUnique(s []string, v string) []string {
 	return append(s, v)
 }
 
-// stateString turns supervisor.State → string for JSON output.
-func stateString(st supervisor.State) string { return st.String() }
-
 // HelperToolsFromAggregator builds []ToolInfo from an aggregator snapshot
 // using the chars/4 estimator. Exposed for the daemon.
 func HelperToolsFromAggregator(snapshot []aggregator.Tool) []ToolInfo {

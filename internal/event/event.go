@@ -22,8 +22,8 @@ const (
 type Event struct {
 	Time     time.Time      `json:"time"`
 	Kind     string         `json:"kind"`
-	Server   string         `json:"server,omitempty"`   // server prefix, if applicable
-	Method   string         `json:"method,omitempty"`   // for mcp.* events
+	Server   string         `json:"server,omitempty"` // server prefix, if applicable
+	Method   string         `json:"method,omitempty"` // for mcp.* events
 	Duration time.Duration  `json:"duration,omitempty"`
 	Bytes    int            `json:"bytes,omitempty"`
 	Error    string         `json:"error,omitempty"`

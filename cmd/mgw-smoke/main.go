@@ -177,7 +177,7 @@ func run() int {
 		} else {
 			result := resp["result"].(map[string]any)
 			b, _ := json.MarshalIndent(result, "  ", "  ")
-			s.pass("tools/call "+*callTool, "isError=" + fmt.Sprint(result["isError"]))
+			s.pass("tools/call "+*callTool, "isError="+fmt.Sprint(result["isError"]))
 			fmt.Printf("  %sresult:%s\n  %s\n", colorDim, colorReset, string(b))
 		}
 	}
@@ -314,4 +314,3 @@ func (s *smoke) fail(name, format string, args ...any) {
 	s.failed = true
 	fmt.Printf("%sFAIL%s %s — %s\n", colorRed, colorReset, name, fmt.Sprintf(format, args...))
 }
-

@@ -9,9 +9,8 @@ func newRestartCmd() *cobra.Command {
 		Use:   "restart",
 		Short: "Stop then start the daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := newStopCmd().RunE(cmd, args); err != nil {
-				// Tolerate "no daemon running" — proceed to start.
-			}
+			// Tolerate "no daemon running" from stop — proceed to start anyway.
+			_ = newStopCmd().RunE(cmd, args)
 			return newStartCmd().RunE(cmd, args)
 		},
 	}
