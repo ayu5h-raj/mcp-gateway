@@ -47,14 +47,14 @@ func (d *detailModel) view(m model) string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render(fmt.Sprintf("  %s  %s  (%s)", s.Name, glyph(s.State), s.State)))
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("  prefix       : %s\n", s.Prefix))
-	b.WriteString(fmt.Sprintf("  enabled      : %v\n", s.Enabled))
-	b.WriteString(fmt.Sprintf("  restart_count: %d\n", s.RestartCount))
+	fmt.Fprintf(&b, "  prefix       : %s\n", s.Prefix)
+	fmt.Fprintf(&b, "  enabled      : %v\n", s.Enabled)
+	fmt.Fprintf(&b, "  restart_count: %d\n", s.RestartCount)
 	if !s.StartedAt.IsZero() {
-		b.WriteString(fmt.Sprintf("  started_at   : %s\n", s.StartedAt.Format("2006-01-02 15:04:05")))
+		fmt.Fprintf(&b, "  started_at   : %s\n", s.StartedAt.Format("2006-01-02 15:04:05"))
 	}
-	b.WriteString(fmt.Sprintf("  log_path     : %s\n", s.LogPath))
-	b.WriteString(fmt.Sprintf("  tool_count   : %d  (~%d tokens)\n", s.ToolCount, s.EstTokens))
+	fmt.Fprintf(&b, "  log_path     : %s\n", s.LogPath)
+	fmt.Fprintf(&b, "  tool_count   : %d  (~%d tokens)\n", s.ToolCount, s.EstTokens)
 	if s.LastError != "" {
 		b.WriteString("\n")
 		b.WriteString(errorStyle.Render("  last error: " + s.LastError))
@@ -68,7 +68,7 @@ func (d *detailModel) view(m model) string {
 		if tl.Server != s.Prefix {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("    %8d  %s\n", tl.EstTokens, tl.Name))
+		fmt.Fprintf(&b, "    %8d  %s\n", tl.EstTokens, tl.Name)
 		count++
 		if count >= 20 {
 			b.WriteString(helpStyle.Render(fmt.Sprintf("    … and %d more\n", s.ToolCount-count)))

@@ -126,9 +126,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
-	// Forward to active sub-model for any other msg (e.g. eventMsg → events tab).
-	switch m.activeTab {
-	case tabEvents:
+	// Forward unrecognized msgs (e.g. eventMsg) to the events sub-model;
+	// it's the only tab that consumes streamed messages.
+	if m.activeTab == tabEvents {
 		newView, cmd := m.eventsView.Update(msg)
 		m.eventsView = newView
 		return m, cmd

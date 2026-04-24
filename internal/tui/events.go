@@ -68,9 +68,9 @@ func (e eventsModel) view(m model) string {
 		} else if ev.Duration > 0 {
 			detail = fmt.Sprintf("%v", ev.Duration.Round(time.Millisecond))
 		}
-		b.WriteString(fmt.Sprintf("  %-8s %-26s %-14s %-30s %s\n",
+		fmt.Fprintf(&b, "  %-8s %-26s %-14s %-30s %s\n",
 			ev.Time.Format("15:04:05"), truncate(ev.Kind, 26),
-			truncate(ev.Server, 14), truncate(ev.Method, 30), detail))
+			truncate(ev.Server, 14), truncate(ev.Method, 30), detail)
 	}
 	return b.String()
 }
