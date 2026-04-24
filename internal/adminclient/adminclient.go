@@ -70,7 +70,7 @@ func (c *Client) do(method, path string, body, into any) error {
 	if err != nil {
 		return fmt.Errorf("adminclient: do (sock=%s): %w", c.sock, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("adminclient: %s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))

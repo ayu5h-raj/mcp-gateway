@@ -37,13 +37,13 @@ func newSecretListCmd() *cobra.Command {
 				return err
 			}
 			tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "ENV VAR\tSET?\tUSED BY")
+			_, _ = fmt.Fprintln(tw, "ENV VAR\tSET?\tUSED BY")
 			for _, s := range got {
 				mark := "✗"
 				if s.Set {
 					mark = "✓"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, mark, strings.Join(s.UsedBy, ", "))
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, mark, strings.Join(s.UsedBy, ", "))
 			}
 			return tw.Flush()
 		},

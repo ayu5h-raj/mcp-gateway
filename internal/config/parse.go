@@ -43,7 +43,7 @@ func ParseFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, &FormatError{Path: path, Err: err}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	c, err := Parse(f)
 	if err != nil {
 		if fe, ok := err.(*FormatError); ok {

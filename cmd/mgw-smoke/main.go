@@ -41,6 +41,14 @@ type smoke struct {
 }
 
 func main() {
+	if code := run(); code != 0 {
+		os.Exit(code)
+	}
+}
+
+// run is the body of main wrapped so deferred cleanups (shutdown, cancel)
+// run before any os.Exit. Returns the process exit code (0 on success).
+func run() int {
 	gateway := flag.String("gateway", "./bin/mcp-gateway", "path to mcp-gateway binary")
 	port := flag.Int("port", 7823, "daemon HTTP port (mcp-gateway daemon must be running)")
 	verbose := flag.Bool("v", false, "print every frame sent and received")
@@ -54,7 +62,8 @@ func main() {
 
 	s, err := startBridge(ctx, *gateway, *port, *verbose)
 	if err != nil {
-		fatal("start bridge: %v", err)
+		fmt.Fprintf(os.Stderr, "%sFATAL%s start bridge: %v\n", colorRed, colorReset, err)
+		return 2
 	}
 	defer s.shutdown()
 
@@ -154,7 +163,8 @@ func main() {
 	if *callTool != "" {
 		var args any
 		if err := json.Unmarshal([]byte(*callArgs), &args); err != nil {
-			fatal("invalid --args JSON: %v", err)
+			fmt.Fprintf(os.Stderr, "%sFATAL%s invalid --args JSON: %v\n", colorRed, colorReset, err)
+			return 2
 		}
 		resp = s.requestExpect(ctx, "tools/call", 6, map[string]any{
 			"name":      *callTool,
@@ -182,9 +192,10 @@ func main() {
 
 	if s.failed {
 		fmt.Printf("\n%sSMOKE FAILED%s\n", colorRed, colorReset)
-		os.Exit(1)
+		return 1
 	}
 	fmt.Printf("\n%sSMOKE PASSED%s — gateway behaves correctly to an MCP client\n", colorGreen, colorReset)
+	return 0
 }
 
 // startBridge spawns `mcp-gateway stdio --port <port>` and wires its stdio.
@@ -304,7 +315,3 @@ func (s *smoke) fail(name, format string, args ...any) {
 	fmt.Printf("%sFAIL%s %s — %s\n", colorRed, colorReset, name, fmt.Sprintf(format, args...))
 }
 
-func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%sFATAL%s %s\n", colorRed, colorReset, fmt.Sprintf(format, args...))
-	os.Exit(2)
-}

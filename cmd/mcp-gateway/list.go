@@ -28,9 +28,9 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 			tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tSTATE\tPREFIX\tTOOLS\t~TOKENS\tLAST ERROR")
+			_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tPREFIX\tTOOLS\t~TOKENS\tLAST ERROR")
 			for _, s := range got {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t~%d\t%s\n", s.Name, s.State, s.Prefix, s.ToolCount, s.EstTokens, truncate(s.LastError, 40))
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t~%d\t%s\n", s.Name, s.State, s.Prefix, s.ToolCount, s.EstTokens, truncate(s.LastError, 40))
 			}
 			return tw.Flush()
 		},
