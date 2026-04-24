@@ -13,6 +13,7 @@ import (
 
 	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
 	"github.com/ayu5h-raj/mcp-gateway/internal/config"
+	"github.com/ayu5h-raj/mcp-gateway/internal/event"
 	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
 	"github.com/ayu5h-raj/mcp-gateway/internal/supervisor"
 )
@@ -27,6 +28,7 @@ type Daemon struct {
 	sup     *supervisor.Supervisor
 	agg     *aggregator.Aggregator
 	clients map[string]*mcpchild.Client
+	events  *event.Bus
 }
 
 // New returns a Daemon with the given home directory and optional logger.
@@ -38,6 +40,7 @@ func New(home string, logger *slog.Logger) *Daemon {
 		Home:    home,
 		Logger:  logger,
 		clients: map[string]*mcpchild.Client{},
+		events:  event.New(10000),
 	}
 }
 
@@ -80,7 +83,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.reconcile(ctx, initial)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", NewMCPHandler(d.agg))
+	mux.Handle("/mcp", NewMCPHandler(d.agg, d.events))
 	addr := fmt.Sprintf("127.0.0.1:%d", initial.Daemon.HTTPPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {

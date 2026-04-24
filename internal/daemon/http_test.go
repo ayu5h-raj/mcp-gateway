@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
+	"github.com/ayu5h-raj/mcp-gateway/internal/event"
 	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
 	"github.com/ayu5h-raj/mcp-gateway/internal/testutil/fakechild"
 )
@@ -52,7 +53,7 @@ func postJSON(t *testing.T, h http.Handler, body any) map[string]any {
 
 func TestMCP_Initialize(t *testing.T) {
 	agg := setupAggregator(t)
-	h := NewMCPHandler(agg)
+	h := NewMCPHandler(agg, event.New(64))
 	out := postJSON(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      "1",
@@ -73,7 +74,7 @@ func TestMCP_Initialize(t *testing.T) {
 
 func TestMCP_ToolsList(t *testing.T) {
 	agg := setupAggregator(t)
-	h := NewMCPHandler(agg)
+	h := NewMCPHandler(agg, event.New(64))
 	out := postJSON(t, h, map[string]any{
 		"jsonrpc": "2.0", "id": "2", "method": "tools/list",
 	})
@@ -86,7 +87,7 @@ func TestMCP_ToolsList(t *testing.T) {
 
 func TestMCP_ToolsCall(t *testing.T) {
 	agg := setupAggregator(t)
-	h := NewMCPHandler(agg)
+	h := NewMCPHandler(agg, event.New(64))
 	out := postJSON(t, h, map[string]any{
 		"jsonrpc": "2.0", "id": "3", "method": "tools/call",
 		"params": map[string]any{"name": "alpha__ping", "arguments": map[string]any{}},
@@ -99,7 +100,7 @@ func TestMCP_ToolsCall(t *testing.T) {
 
 func TestMCP_RejectsUnknownMethod(t *testing.T) {
 	agg := setupAggregator(t)
-	h := NewMCPHandler(agg)
+	h := NewMCPHandler(agg, event.New(64))
 	out := postJSON(t, h, map[string]any{
 		"jsonrpc": "2.0", "id": "4", "method": "no/such/method",
 	})
@@ -110,7 +111,7 @@ func TestMCP_RejectsUnknownMethod(t *testing.T) {
 
 func TestMCP_RejectsNonPost(t *testing.T) {
 	agg := setupAggregator(t)
-	h := NewMCPHandler(agg)
+	h := NewMCPHandler(agg, event.New(64))
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -123,7 +124,7 @@ func TestMCP_RejectsNonPost(t *testing.T) {
 // receive a response. We acknowledge with HTTP 202 and an empty body.
 func TestMCP_NotificationGets202NoBody(t *testing.T) {
 	agg := setupAggregator(t)
-	h := NewMCPHandler(agg)
+	h := NewMCPHandler(agg, event.New(64))
 	cases := []map[string]any{
 		// Canonical: method in notifications/ namespace, no id.
 		{"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -146,7 +147,7 @@ func TestMCP_NotificationGets202NoBody(t *testing.T) {
 // Sanity: ping is a request (has an id) and gets a real response.
 func TestMCP_PingGetsResponse(t *testing.T) {
 	agg := setupAggregator(t)
-	h := NewMCPHandler(agg)
+	h := NewMCPHandler(agg, event.New(64))
 	out := postJSON(t, h, map[string]any{
 		"jsonrpc": "2.0", "id": "p1", "method": "ping",
 	})

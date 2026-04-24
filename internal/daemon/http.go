@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
+	"github.com/ayu5h-raj/mcp-gateway/internal/event"
 )
 
 // NewMCPHandler returns an http.Handler that implements the POST /mcp half of
@@ -16,7 +17,8 @@ import (
 // is a single JSON-RPC request; response is a single JSON-RPC response (or
 // HTTP 202 with no body if the request was a notification).
 // Server-initiated streams (SSE on GET /mcp) are out of scope for v0.
-func NewMCPHandler(agg *aggregator.Aggregator) http.Handler {
+// bus may be nil (no events published in that case).
+func NewMCPHandler(agg *aggregator.Aggregator, bus *event.Bus) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -32,13 +34,31 @@ func NewMCPHandler(agg *aggregator.Aggregator) http.Handler {
 		// receive a response per JSON-RPC 2.0. Acknowledge with 202 and no body.
 		if isNotification(req) {
 			w.WriteHeader(http.StatusAccepted)
+			if bus != nil {
+				bus.Publish(event.Event{Kind: event.KindMCPRequest, Method: req.Method})
+			}
 			return
+		}
+		start := time.Now()
+		if bus != nil {
+			bus.Publish(event.Event{Kind: event.KindMCPRequest, Method: req.Method})
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		resp := dispatch(ctx, agg, req)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
+		if bus != nil {
+			ev := event.Event{
+				Kind:     event.KindMCPResponse,
+				Method:   req.Method,
+				Duration: time.Since(start),
+			}
+			if resp.Error != nil {
+				ev.Error = resp.Error.Message
+			}
+			bus.Publish(ev)
+		}
 	})
 }
 
