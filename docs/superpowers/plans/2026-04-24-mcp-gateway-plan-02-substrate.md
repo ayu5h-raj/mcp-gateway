@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship v0.2 of mcp-gateway adding (a) pidfile + lifecycle robustness, (b) in-process event bus, (c) token estimator, (d) `${secret:NAME}` resolver backed by macOS Keychain, (e) admin RPC over UNIX socket (read + write endpoints), (f) mutation CLI subcommands (`add`/`rm`/`enable`/`disable`/`list`/`secret`/`start`/`stop`/`restart`). After Plan 02, editing the JSONC by hand is optional, secrets never appear in plaintext, and a long-running daemon is robust against double-spawn.
+**Goal:** Ship v0.2 of mcp-gateway adding (a) pidfile + lifecycle robustness, (b) in-process event bus, (c) token estimator, (d) `${env:NAME}` resolver for shell env var references in config, (e) admin RPC over UNIX socket, (f) mutation CLI subcommands (`add`/`rm`/`enable`/`disable`/`list`/`secret`/`start`/`stop`/`restart`). After Plan 02, editing the JSONC by hand is optional and a long-running daemon is robust against double-spawn.
+
+**Note (revised 2026-04-24):** The originally-planned macOS Keychain backend was dropped after a design review. Single-user local tool → file mode 0600 on the config provides the same threat model as the keychain for the realistic vectors on a personal machine. Secrets in v0.2 are either hardcoded in `config.jsonc` (`"GITHUB_TOKEN": "ghp_xxx"`) or pulled from the user's shell env (`"GITHUB_TOKEN": "${env:GITHUB_TOKEN}"`). The `secret.Resolver` API stays pluggable so a future plan can add `KeychainBackend` without breaking config compatibility.
 
 **Architecture:** New packages under `internal/` are independent and stack: `pidfile` and `event` and `tokens` ship behind `internal/` first, then `secret` and `configwrite`, then `admin` (which depends on the prior packages plus a `Daemon` interface). `internal/daemon/daemon.go` is then modified to wire pidfile + event bus + secret resolver + a second UNIX-socket listener serving the admin mux. A small `internal/adminclient` (HTTP-over-UNIX-socket client) is consumed by new Cobra subcommands under `cmd/mcp-gateway/`.
 
@@ -11,7 +13,7 @@
 **Reference high-level plan:** `/Users/ayushraj/.claude/plans/federated-giggling-book.md`.
 **Reference v0.1 plan (style template):** `docs/superpowers/plans/2026-04-23-mcp-gateway-plan-01-foundation.md`.
 
-**v0.2 Success criterion:** A user can run `mcp-gateway start`, then `echo $TOKEN | mcp-gateway secret set github_token`, then `mcp-gateway add github --command npx --arg -y --arg @modelcontextprotocol/server-github --env GITHUB_TOKEN='${secret:github_token}'`, then see the github tools in `mcp-gateway list` — without ever editing JSONC by hand and without the token appearing in any log or config file. `grep -r '<the-real-token>' ~/.mcp-gateway/` returns zero matches.
+**v0.2 Success criterion:** A user can run `mcp-gateway start`, then `mcp-gateway add github --command npx --arg -y --arg @modelcontextprotocol/server-github --env GITHUB_TOKEN='${env:GITHUB_TOKEN}'`, then see the github tools in `mcp-gateway list` — without ever editing JSONC by hand. `mcp-gateway secret list` shows which env vars the config references and whether each is currently set in the shell.
 
 **Not in this plan (deferred):**
 - TUI (Plan 03)
@@ -47,11 +49,8 @@ mcp-gateway/
 │   │   ├── tokens.go                        # new
 │   │   └── tokens_test.go                   # new
 │   ├── secret/
-│   │   ├── secret.go                        # new (Resolver + parser + Backend interface)
-│   │   ├── fake.go                          # new (in-memory backend for tests)
-│   │   ├── keychain.go                      # new (macOS only, build tag darwin)
-│   │   ├── secret_test.go                   # new
-│   │   └── keychain_test.go                 # new (build tag keychain, skipped in CI)
+│   │   ├── secret.go                        # new (Resolve + ResolveEnv + Refs; ${env:NAME} only)
+│   │   └── secret_test.go                   # new
 │   ├── configwrite/
 │   │   ├── configwrite.go                   # new
 │   │   └── configwrite_test.go              # new
@@ -687,9 +686,11 @@ git commit -m "feat(tokens): chars/4 estimator + ToolTokens helper"
 
 ---
 
-## Phase 4 — Secret resolver + fake backend
+## Phase 4 — Secret resolver (env-only, simplified)
 
-Goal: parse `${secret:NAME}` and `${env:NAME}` placeholders inside arbitrary strings; dispatch to a `Backend` per scheme. `${...}` lookups are hard errors; literal `$` is escaped as `$$`.
+Goal: parse `${env:NAME}` placeholders inside arbitrary strings, replacing them with shell env var values. `$$` escapes a literal `$`. Missing env vars are hard errors. Also expose `Refs(s)` for scanning a config string for env var references (used by `secret list`).
+
+**Note:** This phase originally included a pluggable `Backend` interface + `FakeBackend` + macOS Keychain backend. After design review, single-user local tool → file mode 0600 on the config provides the same threat model as keychain. Secrets are just hardcoded in config or pulled from `${env:NAME}`. The interface stays unexported and minimal so a future `KeychainBackend` can be added without breaking the API.
 
 ### Task 4.1: secret — write the test first
 
@@ -709,114 +710,95 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newResolver(t *testing.T) (*Resolver, *FakeBackend) {
-	t.Helper()
-	fb := NewFakeBackend()
-	r := NewResolver()
-	r.Register("secret", fb)
-	r.Register("env", &EnvBackend{})
-	return r, fb
-}
-
 func TestResolve_NoOpOnPlainString(t *testing.T) {
-	r, _ := newResolver(t)
-	out, err := r.Resolve("plain value")
+	out, err := Resolve("plain value")
 	require.NoError(t, err)
 	assert.Equal(t, "plain value", out)
 }
 
-func TestResolve_SecretSubstitution(t *testing.T) {
-	r, fb := newResolver(t)
-	require.NoError(t, fb.Set("github_token", "ghp_test"))
-
-	out, err := r.Resolve("${secret:github_token}")
-	require.NoError(t, err)
-	assert.Equal(t, "ghp_test", out)
-}
-
 func TestResolve_EnvSubstitution(t *testing.T) {
-	r, _ := newResolver(t)
 	t.Setenv("MY_VAR", "hello")
-	out, err := r.Resolve("prefix-${env:MY_VAR}-suffix")
+	out, err := Resolve("prefix-${env:MY_VAR}-suffix")
 	require.NoError(t, err)
 	assert.Equal(t, "prefix-hello-suffix", out)
 }
 
 func TestResolve_MultipleSubstitutions(t *testing.T) {
-	r, fb := newResolver(t)
-	require.NoError(t, fb.Set("a", "ALPHA"))
-	require.NoError(t, fb.Set("b", "BETA"))
-	out, err := r.Resolve("${secret:a}/${secret:b}")
+	t.Setenv("A", "ALPHA")
+	t.Setenv("B", "BETA")
+	out, err := Resolve("${env:A}/${env:B}")
 	require.NoError(t, err)
 	assert.Equal(t, "ALPHA/BETA", out)
 }
 
-func TestResolve_MissingSecretErrors(t *testing.T) {
-	r, _ := newResolver(t)
-	_, err := r.Resolve("${secret:no_such_key}")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no_such_key")
-}
-
 func TestResolve_MissingEnvErrors(t *testing.T) {
-	r, _ := newResolver(t)
 	os.Unsetenv("DEFINITELY_NOT_SET_ENV_VAR_12345")
-	_, err := r.Resolve("${env:DEFINITELY_NOT_SET_ENV_VAR_12345}")
+	_, err := Resolve("${env:DEFINITELY_NOT_SET_ENV_VAR_12345}")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DEFINITELY_NOT_SET_ENV_VAR_12345")
 }
 
 func TestResolve_UnknownSchemeErrors(t *testing.T) {
-	r, _ := newResolver(t)
-	_, err := r.Resolve("${nope:x}")
+	_, err := Resolve("${nope:x}")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nope")
 }
 
 func TestResolve_DollarDollarEscapeIsLiteralDollar(t *testing.T) {
-	r, _ := newResolver(t)
-	out, err := r.Resolve("price is $$5")
+	out, err := Resolve("price is $$5")
 	require.NoError(t, err)
 	assert.Equal(t, "price is $5", out)
 }
 
+func TestResolve_StrayDollarErrors(t *testing.T) {
+	_, err := Resolve("a $ b")
+	require.Error(t, err)
+}
+
+func TestResolve_UnterminatedPlaceholderErrors(t *testing.T) {
+	_, err := Resolve("${env:FOO")
+	require.Error(t, err)
+}
+
+func TestResolve_MalformedPlaceholderErrors(t *testing.T) {
+	_, err := Resolve("${noScheme}")
+	require.Error(t, err)
+}
+
 func TestResolveEnv_AppliesToAllValues(t *testing.T) {
-	r, fb := newResolver(t)
-	require.NoError(t, fb.Set("token", "tok"))
+	t.Setenv("TOKEN", "tok")
 	in := map[string]string{
-		"GITHUB_TOKEN": "${secret:token}",
+		"GITHUB_TOKEN": "${env:TOKEN}",
 		"PLAIN":        "verbatim",
 	}
-	out, err := r.ResolveEnv(in)
+	out, err := ResolveEnv(in)
 	require.NoError(t, err)
 	assert.Equal(t, "tok", out["GITHUB_TOKEN"])
 	assert.Equal(t, "verbatim", out["PLAIN"])
 }
 
-func TestFakeBackend_CRUD(t *testing.T) {
-	fb := NewFakeBackend()
+func TestRefs_FindsAllEnvReferences(t *testing.T) {
+	got := Refs("hello ${env:A} world ${env:B} ${env:A}")
+	assert.ElementsMatch(t, []string{"A", "B"}, got)
+}
 
-	require.NoError(t, fb.Set("a", "1"))
-	v, err := fb.Get("a")
-	require.NoError(t, err)
-	assert.Equal(t, "1", v)
+func TestRefs_IgnoresUnknownSchemes(t *testing.T) {
+	got := Refs("${secret:X} ${env:Y}")
+	assert.Equal(t, []string{"Y"}, got)
+}
 
-	names, err := fb.List()
-	require.NoError(t, err)
-	assert.Equal(t, []string{"a"}, names)
-
-	require.NoError(t, fb.Delete("a"))
-	_, err = fb.Get("a")
-	require.Error(t, err)
+func TestRefs_EmptyOnPlainString(t *testing.T) {
+	assert.Empty(t, Refs("nothing here"))
 }
 ```
 
-- [ ] **Step 2: Run — fails**
+- [ ] **Step 2: Run — fails (Resolve / ResolveEnv / Refs undefined)**
 
 ```bash
 go test ./internal/secret/ -v
 ```
 
-### Task 4.2: secret — implement Resolver, parser, EnvBackend
+### Task 4.2: secret — implement
 
 **Files:**
 - Create: `internal/secret/secret.go`
@@ -824,49 +806,25 @@ go test ./internal/secret/ -v
 - [ ] **Step 1: Implement**
 
 ```go
-// Package secret resolves ${scheme:name} placeholders against pluggable
-// backends. The default schemes are "secret" (keychain on macOS) and "env"
-// (OS environment variables).
+// Package secret resolves ${env:NAME} placeholders in config values against
+// the OS environment. v0.2 supports only the "env" scheme; the parser is
+// scheme-aware so future plans can add e.g. "keychain" without breaking
+// existing configs.
+//
+// "$$" escapes a literal "$". Missing env vars are hard errors (not silent
+// empty substitution).
 package secret
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 )
 
-// ErrNotFound is returned by a Backend when the requested name does not exist.
-var ErrNotFound = errors.New("secret: not found")
-
-// Backend stores secrets keyed by name.
-type Backend interface {
-	Get(name string) (string, error)
-	Set(name, value string) error
-	Delete(name string) error
-	List() ([]string, error)
-}
-
-// Resolver dispatches ${scheme:name} placeholders to a registered Backend.
-type Resolver struct {
-	backends map[string]Backend
-}
-
-// NewResolver returns an empty Resolver. Register schemes via Register.
-func NewResolver() *Resolver {
-	return &Resolver{backends: map[string]Backend{}}
-}
-
-// Register adds a backend for a scheme name. The "env" and "secret" schemes
-// are conventional but not auto-registered — daemon.Run wires them.
-func (r *Resolver) Register(scheme string, b Backend) {
-	r.backends[scheme] = b
-}
-
-// Resolve replaces every ${scheme:name} in s with the value from the
-// corresponding backend. "$$" is an escape for a literal "$". Errors loudly
-// on a missing backend, missing key, or malformed placeholder.
-func (r *Resolver) Resolve(s string) (string, error) {
+// Resolve replaces every ${env:NAME} in s with os.Getenv(NAME).
+// "$$" → literal "$". Errors loudly on missing env, unknown scheme, or
+// malformed placeholder.
+func Resolve(s string) (string, error) {
 	var b strings.Builder
 	i := 0
 	for i < len(s) {
@@ -882,13 +840,12 @@ func (r *Resolver) Resolve(s string) (string, error) {
 			i += 2
 			continue
 		}
-		// Expect "${scheme:name}"
 		if i+1 >= len(s) || s[i+1] != '{' {
-			return "", fmt.Errorf("secret: stray $ at position %d", i)
+			return "", fmt.Errorf("secret: stray $ at position %d in %q", i, s)
 		}
 		end := strings.IndexByte(s[i+2:], '}')
 		if end < 0 {
-			return "", fmt.Errorf("secret: unterminated ${ at position %d", i)
+			return "", fmt.Errorf("secret: unterminated ${ at position %d in %q", i, s)
 		}
 		body := s[i+2 : i+2+end]
 		colon := strings.IndexByte(body, ':')
@@ -896,13 +853,12 @@ func (r *Resolver) Resolve(s string) (string, error) {
 			return "", fmt.Errorf("secret: invalid placeholder %q (need scheme:name)", body)
 		}
 		scheme, name := body[:colon], body[colon+1:]
-		backend, ok := r.backends[scheme]
-		if !ok {
-			return "", fmt.Errorf("secret: unknown scheme %q in placeholder", scheme)
+		if scheme != "env" {
+			return "", fmt.Errorf("secret: unknown scheme %q (only \"env\" is supported in v0.2)", scheme)
 		}
-		v, err := backend.Get(name)
-		if err != nil {
-			return "", fmt.Errorf("secret: %s:%s: %w", scheme, name, err)
+		v, ok := os.LookupEnv(name)
+		if !ok {
+			return "", fmt.Errorf("secret: env var %q is not set", name)
 		}
 		b.WriteString(v)
 		i += 2 + end + 1
@@ -910,12 +866,12 @@ func (r *Resolver) Resolve(s string) (string, error) {
 	return b.String(), nil
 }
 
-// ResolveEnv applies Resolve to every value in env, returning a new map.
-// On any error, returns the partial result so far is discarded.
-func (r *Resolver) ResolveEnv(env map[string]string) (map[string]string, error) {
+// ResolveEnv applies Resolve to every value in env. On any error returns
+// the error wrapped with the originating env-map key.
+func ResolveEnv(env map[string]string) (map[string]string, error) {
 	out := make(map[string]string, len(env))
 	for k, v := range env {
-		resolved, err := r.Resolve(v)
+		resolved, err := Resolve(v)
 		if err != nil {
 			return nil, fmt.Errorf("env %s: %w", k, err)
 		}
@@ -924,91 +880,30 @@ func (r *Resolver) ResolveEnv(env map[string]string) (map[string]string, error) 
 	return out, nil
 }
 
-// EnvBackend looks up secrets in the OS environment.
-type EnvBackend struct{}
-
-// Get returns os.Getenv(name) or ErrNotFound if unset.
-func (EnvBackend) Get(name string) (string, error) {
-	v, ok := os.LookupEnv(name)
-	if !ok {
-		return "", ErrNotFound
+// Refs returns the unique env var names referenced via ${env:NAME} in s.
+// Order is undefined. Unknown schemes are ignored (not errored).
+func Refs(s string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	i := 0
+	for i < len(s) {
+		j := strings.Index(s[i:], "${env:")
+		if j < 0 {
+			break
+		}
+		start := i + j + len("${env:")
+		end := strings.IndexByte(s[start:], '}')
+		if end < 0 {
+			break
+		}
+		name := s[start : start+end]
+		if _, dup := seen[name]; !dup {
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+		i = start + end + 1
 	}
-	return v, nil
-}
-
-// Set is unsupported for EnvBackend (env vars are caller-set).
-func (EnvBackend) Set(string, string) error { return errors.New("env: read-only") }
-
-// Delete is unsupported.
-func (EnvBackend) Delete(string) error { return errors.New("env: read-only") }
-
-// List returns nil (env enumeration is intentionally not exposed).
-func (EnvBackend) List() ([]string, error) { return nil, nil }
-```
-
-### Task 4.3: secret — implement FakeBackend
-
-**Files:**
-- Create: `internal/secret/fake.go`
-
-- [ ] **Step 1: Implement**
-
-```go
-package secret
-
-import (
-	"sort"
-	"sync"
-)
-
-// FakeBackend is an in-memory Backend used in tests.
-type FakeBackend struct {
-	mu sync.Mutex
-	m  map[string]string
-}
-
-// NewFakeBackend returns an empty FakeBackend.
-func NewFakeBackend() *FakeBackend {
-	return &FakeBackend{m: map[string]string{}}
-}
-
-// Get returns the value for name or ErrNotFound.
-func (f *FakeBackend) Get(name string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v, ok := f.m[name]
-	if !ok {
-		return "", ErrNotFound
-	}
-	return v, nil
-}
-
-// Set stores name → value.
-func (f *FakeBackend) Set(name, value string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.m[name] = value
-	return nil
-}
-
-// Delete removes name.
-func (f *FakeBackend) Delete(name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.m, name)
-	return nil
-}
-
-// List returns sorted secret names.
-func (f *FakeBackend) List() ([]string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]string, 0, len(f.m))
-	for k := range f.m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out, nil
+	return out
 }
 ```
 
@@ -1018,141 +913,20 @@ func (f *FakeBackend) List() ([]string, error) {
 go test -race -count=1 ./internal/secret/ -v
 ```
 
-Expected: all PASS.
+Expected: 13 PASS.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add internal/secret/secret.go internal/secret/fake.go internal/secret/secret_test.go
-git commit -m "feat(secret): \${scheme:name} resolver with EnvBackend and FakeBackend"
+git add internal/secret/
+git commit -m "feat(secret): \${env:NAME} resolver"
 ```
 
 ---
 
-## Phase 5 — Keychain backend
+## Phase 5 — REMOVED
 
-Goal: a `secret.Backend` implementation backed by macOS Keychain via `github.com/zalando/go-keyring`. Build-tagged `darwin` so Linux/Windows builds don't pull it. A separate test file is `keychain` build-tagged so it doesn't run in CI (which has no real keychain).
-
-### Task 5.1: keychain — implement
-
-**Files:**
-- Create: `internal/secret/keychain.go`
-
-- [ ] **Step 1: Add the dep**
-
-```bash
-go get github.com/zalando/go-keyring
-go mod tidy
-```
-
-- [ ] **Step 2: Implement**
-
-```go
-//go:build darwin
-
-// Package secret — keychain.go provides a Backend backed by macOS Keychain.
-package secret
-
-import (
-	"errors"
-
-	"github.com/zalando/go-keyring"
-)
-
-// KeychainService is the keychain "service" name under which all mcp-gateway
-// secrets are stored. Each secret is `{Service: KeychainService, Account: name}`.
-const KeychainService = "mcp-gateway"
-
-// KeychainBackend stores secrets in the macOS Keychain.
-type KeychainBackend struct{}
-
-// NewKeychainBackend returns a KeychainBackend.
-func NewKeychainBackend() *KeychainBackend { return &KeychainBackend{} }
-
-// Get returns the value or ErrNotFound.
-func (KeychainBackend) Get(name string) (string, error) {
-	v, err := keyring.Get(KeychainService, name)
-	if err != nil {
-		if errors.Is(err, keyring.ErrNotFound) {
-			return "", ErrNotFound
-		}
-		return "", err
-	}
-	return v, nil
-}
-
-// Set stores the value in the keychain.
-func (KeychainBackend) Set(name, value string) error {
-	return keyring.Set(KeychainService, name, value)
-}
-
-// Delete removes the secret.
-func (KeychainBackend) Delete(name string) error {
-	if err := keyring.Delete(KeychainService, name); err != nil {
-		if errors.Is(err, keyring.ErrNotFound) {
-			return ErrNotFound
-		}
-		return err
-	}
-	return nil
-}
-
-// List is not supported by go-keyring directly; returns nil.
-// The admin handler enumerates secret names from config.Server.Env values
-// (via ${secret:NAME} extraction), not by enumerating the keychain itself.
-func (KeychainBackend) List() ([]string, error) { return nil, nil }
-```
-
-### Task 5.2: keychain — manual integration test (skipped in CI)
-
-**Files:**
-- Create: `internal/secret/keychain_test.go`
-
-- [ ] **Step 1: Write the test (build-tagged)**
-
-```go
-//go:build darwin && keychain
-
-package secret
-
-import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
-
-func TestKeychain_RoundTrip(t *testing.T) {
-	b := NewKeychainBackend()
-	const key = "mcp-gateway-test-key-do-not-use"
-
-	require.NoError(t, b.Set(key, "value-1"))
-	t.Cleanup(func() { _ = b.Delete(key) })
-
-	v, err := b.Get(key)
-	require.NoError(t, err)
-	assert.Equal(t, "value-1", v)
-
-	require.NoError(t, b.Delete(key))
-	_, err = b.Get(key)
-	require.ErrorIs(t, err, ErrNotFound)
-}
-```
-
-- [ ] **Step 2: Run manually (only when you have a real keychain available)**
-
-```bash
-go test -tags keychain -count=1 ./internal/secret/
-```
-
-Expected: PASS. CI does NOT pass `-tags keychain`, so the test is skipped there.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add internal/secret/keychain.go internal/secret/keychain_test.go go.mod go.sum
-git commit -m "feat(secret): macOS Keychain backend (build tag darwin)"
-```
+Originally: macOS Keychain backend. Dropped after design review (see Phase 4 note). No work in this phase. Phase numbering preserved so downstream phase numbers don't shift.
 
 ---
 
@@ -1397,6 +1171,7 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -1415,7 +1190,6 @@ type Daemon interface {
 	Server(name string) (ServerInfo, bool)
 	Tools() []ToolInfo
 	Bus() *event.Bus
-	SecretBackend() secret.Backend
 	ConfigPath() string
 	ConfigBytes() ([]byte, error)
 
@@ -1425,8 +1199,6 @@ type Daemon interface {
 	EnableServer(name string) error
 	DisableServer(name string) error
 	Reload() error
-	SetSecret(name, value string) error
-	DeleteSecret(name string) error
 }
 
 // Status is the daemon-level snapshot.
@@ -1479,6 +1251,7 @@ type ServerSpec struct {
 type SecretInfo struct {
 	Name   string   `json:"name"`
 	UsedBy []string `json:"used_by"`
+	Set    bool     `json:"set"`
 }
 
 // NewHandler returns the admin /admin/* http.Handler.
@@ -1543,17 +1316,7 @@ func NewHandler(d Daemon) http.Handler {
 		}
 		handleListSecrets(d, w, r)
 	})
-	mux.HandleFunc("/admin/secret/", func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(r.URL.Path, "/admin/secret/")
-		switch r.Method {
-		case http.MethodPost:
-			handleSetSecret(d, w, r, name)
-		case http.MethodDelete:
-			handleDeleteSecret(d, w, name)
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
+	// /admin/secret/* — POST/DELETE removed in revised plan (no keychain in v0.2).
 	mux.HandleFunc("/admin/config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1626,51 +1389,25 @@ func handleDisableServer(d Daemon, w http.ResponseWriter, name string) {
 }
 
 func handleListSecrets(d Daemon, w http.ResponseWriter, _ *http.Request) {
-	// Walk the config to find ${secret:NAME} references.
+	// Walk the config to find ${env:NAME} references and report whether
+	// each referenced var is currently set in the daemon's process env.
 	cfgBytes, err := d.ConfigBytes()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	names := extractSecretNames(cfgBytes)
+	names := extractEnvRefs(cfgBytes)
 	out := make([]SecretInfo, 0, len(names))
 	for name, used := range names {
-		out = append(out, SecretInfo{Name: name, UsedBy: used})
+		_, isSet := os.LookupEnv(name)
+		out = append(out, SecretInfo{Name: name, UsedBy: used, Set: isSet})
 	}
 	writeJSON(w, out)
 }
 
-func handleSetSecret(d Daemon, w http.ResponseWriter, r *http.Request, name string) {
-	var body struct {
-		Value string `json:"value"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if body.Value == "" {
-		http.Error(w, "value required", http.StatusBadRequest)
-		return
-	}
-	if err := d.SetSecret(name, body.Value); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func handleDeleteSecret(d Daemon, w http.ResponseWriter, name string) {
-	if err := d.DeleteSecret(name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// extractSecretNames returns a map of secret name → server names that
-// reference it. Pure: parses the JSON, walks mcpServers.*.env values, and
-// finds ${secret:NAME} placeholders.
-func extractSecretNames(cfgBytes []byte) map[string][]string {
+// extractEnvRefs returns a map of env var name → server names that reference
+// it via ${env:NAME} in their config Env map. Pure.
+func extractEnvRefs(cfgBytes []byte) map[string][]string {
 	out := map[string][]string{}
 	var raw struct {
 		MCPServers map[string]struct {
@@ -1682,28 +1419,10 @@ func extractSecretNames(cfgBytes []byte) map[string][]string {
 	}
 	for srv, s := range raw.MCPServers {
 		for _, v := range s.Env {
-			for _, name := range scanSecretRefs(v) {
+			for _, name := range secret.Refs(v) {
 				out[name] = appendUnique(out[name], srv)
 			}
 		}
-	}
-	return out
-}
-
-func scanSecretRefs(s string) []string {
-	var out []string
-	for i := 0; i < len(s); {
-		j := strings.Index(s[i:], "${secret:")
-		if j < 0 {
-			break
-		}
-		start := i + j + len("${secret:")
-		end := strings.IndexByte(s[start:], '}')
-		if end < 0 {
-			break
-		}
-		out = append(out, s[start:start+end])
-		i = start + end + 1
 	}
 	return out
 }
@@ -1818,6 +1537,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -1826,7 +1546,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ayu5h-raj/mcp-gateway/internal/event"
-	"github.com/ayu5h-raj/mcp-gateway/internal/secret"
 	"github.com/ayu5h-raj/mcp-gateway/internal/supervisor"
 )
 
@@ -1836,7 +1555,6 @@ type mockDaemon struct {
 	servers   []ServerInfo
 	tools     []ToolInfo
 	bus       *event.Bus
-	sec       secret.Backend
 	cfgBytes  []byte
 	cfgPath   string
 	addCalls  []ServerSpec
@@ -1844,16 +1562,10 @@ type mockDaemon struct {
 	enabled   []string
 	disabled  []string
 	reloads   int
-	setSec    map[string]string
-	delSec    []string
 }
 
 func newMockDaemon() *mockDaemon {
-	return &mockDaemon{
-		bus:    event.New(64),
-		sec:    secret.NewFakeBackend(),
-		setSec: map[string]string{},
-	}
+	return &mockDaemon{bus: event.New(64)}
 }
 
 func (m *mockDaemon) Status() Status                 { return m.status }
@@ -1868,7 +1580,6 @@ func (m *mockDaemon) Server(n string) (ServerInfo, bool) {
 }
 func (m *mockDaemon) Tools() []ToolInfo              { return m.tools }
 func (m *mockDaemon) Bus() *event.Bus                { return m.bus }
-func (m *mockDaemon) SecretBackend() secret.Backend  { return m.sec }
 func (m *mockDaemon) ConfigPath() string             { return m.cfgPath }
 func (m *mockDaemon) ConfigBytes() ([]byte, error)   { return m.cfgBytes, nil }
 
@@ -1877,8 +1588,6 @@ func (m *mockDaemon) RemoveServer(n string) error     { m.mu.Lock(); m.removed =
 func (m *mockDaemon) EnableServer(n string) error     { m.mu.Lock(); m.enabled = append(m.enabled, n); m.mu.Unlock(); return nil }
 func (m *mockDaemon) DisableServer(n string) error    { m.mu.Lock(); m.disabled = append(m.disabled, n); m.mu.Unlock(); return nil }
 func (m *mockDaemon) Reload() error                   { m.mu.Lock(); m.reloads++; m.mu.Unlock(); return nil }
-func (m *mockDaemon) SetSecret(n, v string) error     { m.mu.Lock(); m.setSec[n] = v; m.mu.Unlock(); return m.sec.Set(n, v) }
-func (m *mockDaemon) DeleteSecret(n string) error     { m.mu.Lock(); m.delSec = append(m.delSec, n); m.mu.Unlock(); return m.sec.Delete(n) }
 
 func TestAdmin_GETStatus(t *testing.T) {
 	d := newMockDaemon()
@@ -1950,14 +1659,17 @@ func TestAdmin_GETTools(t *testing.T) {
 	assert.Equal(t, "alpha__hello", got[0].Name)
 }
 
-func TestAdmin_GETSecretListsNamesOnly(t *testing.T) {
+func TestAdmin_GETSecretListsEnvRefsAndStatus(t *testing.T) {
+	t.Setenv("GH_TOKEN", "set")
+	os.Unsetenv("SLACK_BOT")
+
 	d := newMockDaemon()
 	d.cfgBytes = []byte(`{
 		"version":1,
 		"daemon":{"http_port":7823,"log_level":"info"},
 		"mcpServers":{
-			"github":{"command":"npx","env":{"GITHUB_TOKEN":"${secret:gh_token}"},"enabled":true},
-			"slack":{"command":"npx","env":{"SLACK_TOKEN":"${secret:slack_bot}","X":"${secret:gh_token}"},"enabled":true}
+			"github":{"command":"npx","env":{"GITHUB_TOKEN":"${env:GH_TOKEN}"},"enabled":true},
+			"slack":{"command":"npx","env":{"SLACK_TOKEN":"${env:SLACK_BOT}","X":"${env:GH_TOKEN}"},"enabled":true}
 		}
 	}`)
 	srv := httptest.NewServer(NewHandler(d))
@@ -1969,12 +1681,14 @@ func TestAdmin_GETSecretListsNamesOnly(t *testing.T) {
 
 	var got []SecretInfo
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
-	names := map[string][]string{}
+	byName := map[string]SecretInfo{}
 	for _, s := range got {
-		names[s.Name] = s.UsedBy
+		byName[s.Name] = s
 	}
-	assert.ElementsMatch(t, []string{"github", "slack"}, names["gh_token"])
-	assert.ElementsMatch(t, []string{"slack"}, names["slack_bot"])
+	assert.ElementsMatch(t, []string{"github", "slack"}, byName["GH_TOKEN"].UsedBy)
+	assert.True(t, byName["GH_TOKEN"].Set)
+	assert.ElementsMatch(t, []string{"slack"}, byName["SLACK_BOT"].UsedBy)
+	assert.False(t, byName["SLACK_BOT"].Set)
 }
 
 func TestAdmin_GETConfigReturnsBytes(t *testing.T) {
@@ -2114,48 +1828,7 @@ func TestAdmin_POSTReload(t *testing.T) {
 	assert.Equal(t, 1, d.reloads)
 }
 
-func TestAdmin_POSTSecretWritesToBackend(t *testing.T) {
-	d := newMockDaemon()
-	srv := httptest.NewServer(NewHandler(d))
-	defer srv.Close()
-
-	body := `{"value":"ghp_test"}`
-	resp, err := http.Post(srv.URL+"/admin/secret/github_token", "application/json", bytes.NewReader([]byte(body)))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
-
-	v, err := d.sec.Get("github_token")
-	require.NoError(t, err)
-	assert.Equal(t, "ghp_test", v)
-}
-
-func TestAdmin_DELETESecretRemovesFromBackend(t *testing.T) {
-	d := newMockDaemon()
-	require.NoError(t, d.sec.Set("x", "y"))
-	srv := httptest.NewServer(NewHandler(d))
-	defer srv.Close()
-
-	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/admin/secret/x", nil)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
-
-	_, err = d.sec.Get("x")
-	require.Error(t, err)
-}
-
-func TestAdmin_POSTSecretRejectsEmptyValue(t *testing.T) {
-	d := newMockDaemon()
-	srv := httptest.NewServer(NewHandler(d))
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/admin/secret/empty", "application/json", bytes.NewReader([]byte(`{"value":""}`)))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-}
+// Secret POST/DELETE tests removed in revised plan — no keychain backend in v0.2.
 ```
 
 - [ ] **Step 2: Add `bytes` import to admin_test.go (if not present)**
@@ -2325,8 +1998,6 @@ type Daemon struct {
 	agg             *aggregator.Aggregator
 	clients         map[string]*mcpchild.Client
 	events          *event.Bus
-	secrets         *secret.Resolver
-	keychain        secret.Backend
 	pidfileRelease  func()
 	socketPath      string
 	startedAt       time.Time
@@ -2341,46 +2012,15 @@ func New(home string, logger *slog.Logger) *Daemon {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
-	keychain := secret.NewKeychainBackend()
-	resolver := secret.NewResolver()
-	resolver.Register("secret", keychain)
-	resolver.Register("env", secret.EnvBackend{})
 	return &Daemon{
-		Home:     home,
-		Logger:   logger,
-		Version:  "0.2",
-		clients:  map[string]*mcpchild.Client{},
-		events:   event.New(10000),
-		secrets:  resolver,
-		keychain: keychain,
+		Home:    home,
+		Logger:  logger,
+		Version: "0.2",
+		clients: map[string]*mcpchild.Client{},
+		events:  event.New(10000),
 	}
 }
 ```
-
-Note: `secret.NewKeychainBackend()` is build-tagged `darwin`; for non-darwin builds add a `//go:build !darwin` stub in `internal/secret/keychain_other.go`:
-
-```go
-//go:build !darwin
-
-package secret
-
-// NewKeychainBackend on non-darwin platforms returns a backend that always
-// errors. Plan 02 ships macOS-only; cross-platform later.
-func NewKeychainBackend() Backend {
-	return errBackend{err: errKeychainUnsupported}
-}
-
-type errBackend struct{ err error }
-
-func (e errBackend) Get(string) (string, error)    { return "", e.err }
-func (e errBackend) Set(string, string) error      { return e.err }
-func (e errBackend) Delete(string) error           { return e.err }
-func (e errBackend) List() ([]string, error)       { return nil, e.err }
-
-var errKeychainUnsupported = errors.New("secret: keychain backend not built (darwin only in v0.2)")
-```
-
-(Add `errors` import.)
 
 - [ ] **Step 3: Rewrite `Run` to open both listeners + pidfile**
 
@@ -2532,14 +2172,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 Add imports: `net`, `internal/admin`, `internal/event`, `internal/pidfile`, `internal/secret`.
 
-- [ ] **Step 4: Update `reconcile` to resolve secrets**
+- [ ] **Step 4: Update `reconcile` to resolve env-var refs**
 
 In `reconcile`, before calling `d.sup.Set(...)`:
 
 ```go
-resolvedEnv, err := d.secrets.ResolveEnv(s.Env)
+resolvedEnv, err := secret.ResolveEnv(s.Env)
 if err != nil {
-    d.Logger.Error("secret resolution failed", "server", name, "err", err)
+    d.Logger.Error("env resolution failed", "server", name, "err", err)
     continue
 }
 d.sup.Set(name, supervisor.ServerSpec{
@@ -2632,8 +2272,6 @@ func (d *Daemon) Tools() []admin.ToolInfo {
 
 func (d *Daemon) Bus() *event.Bus { return d.events }
 
-func (d *Daemon) SecretBackend() secret.Backend { return d.keychain }
-
 func (d *Daemon) ConfigPath() string { return filepath.Join(d.Home, "config.jsonc") }
 
 func (d *Daemon) ConfigBytes() ([]byte, error) {
@@ -2683,17 +2321,9 @@ func (d *Daemon) Reload() error {
 	now := time.Now()
 	return os.Chtimes(d.ConfigPath(), now, now)
 }
-
-func (d *Daemon) SetSecret(name, value string) error {
-	return d.keychain.Set(name, value)
-}
-
-func (d *Daemon) DeleteSecret(name string) error {
-	return d.keychain.Delete(name)
-}
 ```
 
-Add imports: `internal/admin`, `internal/configwrite`, `internal/tokens`.
+Add imports: `internal/admin`, `internal/configwrite`, `internal/tokens`, `internal/secret`.
 
 - [ ] **Step 6: Run all tests + e2e**
 
@@ -2707,8 +2337,8 @@ Expected: all green (the v0.1 e2e still passes; admin endpoints are tested via m
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/daemon/ internal/secret/keychain_other.go
-git commit -m "feat(daemon): wire pidfile, event bus, secrets, UNIX socket + admin mux"
+git add internal/daemon/
+git commit -m "feat(daemon): wire pidfile, event bus, env-resolver, UNIX socket + admin mux"
 ```
 
 ---
@@ -3202,29 +2832,23 @@ git commit -m "feat(cli): add list/add/rm/enable/disable subcommands via admin R
 
 ---
 
-## Phase 12 — CLI: secret
+## Phase 12 — CLI: secret list
 
-Goal: `mcp-gateway secret set NAME` reads value via stdin (no echo on TTY); `mcp-gateway secret list` prints names; `mcp-gateway secret rm NAME` deletes from keychain.
+Goal: `mcp-gateway secret list` shows env vars referenced by the config (`${env:NAME}` placeholders) and whether each is currently set in the daemon's process env. Useful for "did I forget to export `$GITHUB_TOKEN` before starting the daemon?"
+
+**Note:** Original plan included `secret set` and `secret rm` operating against macOS Keychain. Both removed in revised scope (no keychain in v0.2). Setting an env var is the user's shell's job; deleting one is `unset` in the shell. The CLI just surfaces what the gateway needs.
 
 ### Task 12.1: secret subcommand
 
 **Files:**
 - Create: `cmd/mcp-gateway/secret.go`
 
-- [ ] **Step 1: Add the term dep**
-
-```bash
-go get golang.org/x/term
-go mod tidy
-```
-
-- [ ] **Step 2: Implement**
+- [ ] **Step 1: Implement**
 
 ```go
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -3232,7 +2856,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/ayu5h-raj/mcp-gateway/internal/admin"
 	"github.com/ayu5h-raj/mcp-gateway/internal/adminclient"
@@ -3241,56 +2864,16 @@ import (
 func newSecretCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secret",
-		Short: "Manage secrets stored in macOS Keychain",
+		Short: "Inspect ${env:*} references in the config",
 	}
-	cmd.AddCommand(newSecretSetCmd(), newSecretListCmd(), newSecretRmCmd())
+	cmd.AddCommand(newSecretListCmd())
 	return cmd
-}
-
-func newSecretSetCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "set <name>",
-		Short: "Set a secret. Value read from stdin (no echo on TTY).",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			name := args[0]
-			value, err := readSecretValue()
-			if err != nil {
-				return err
-			}
-			home, _ := os.UserHomeDir()
-			c := adminclient.New(filepath.Join(home, ".mcp-gateway", "sock"))
-			if err := c.Post("/admin/secret/"+name, map[string]string{"value": value}, nil); err != nil {
-				return err
-			}
-			fmt.Printf("secret %s set\n", name)
-			return nil
-		},
-	}
-}
-
-func readSecretValue() (string, error) {
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprint(os.Stderr, "Value: ")
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimRight(string(b), "\r\n"), nil
-	}
-	r := bufio.NewReader(os.Stdin)
-	v, err := r.ReadString('\n')
-	if err != nil && v == "" {
-		return "", err
-	}
-	return strings.TrimRight(v, "\r\n"), nil
 }
 
 func newSecretListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List secret names referenced by the config",
+		Short: "List env vars the config references and whether each is set",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			home, _ := os.UserHomeDir()
 			c := adminclient.New(filepath.Join(home, ".mcp-gateway", "sock"))
@@ -3299,51 +2882,39 @@ func newSecretListCmd() *cobra.Command {
 				return err
 			}
 			tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tUSED BY")
+			fmt.Fprintln(tw, "ENV VAR\tSET?\tUSED BY")
 			for _, s := range got {
-				fmt.Fprintf(tw, "%s\t%s\n", s.Name, strings.Join(s.UsedBy, ", "))
+				mark := "✗"
+				if s.Set {
+					mark = "✓"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, mark, strings.Join(s.UsedBy, ", "))
 			}
 			return tw.Flush()
 		},
 	}
 }
-
-func newSecretRmCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "rm <name>",
-		Short: "Delete a secret from the keychain",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			home, _ := os.UserHomeDir()
-			c := adminclient.New(filepath.Join(home, ".mcp-gateway", "sock"))
-			if err := c.Delete("/admin/secret/" + args[0]); err != nil {
-				return err
-			}
-			fmt.Printf("secret %s deleted\n", args[0])
-			return nil
-		},
-	}
-}
 ```
 
-- [ ] **Step 3: Register in `main.go`**
+- [ ] **Step 2: Register in `main.go`**
 
 ```go
 root.AddCommand(newSecretCmd())
 ```
 
-- [ ] **Step 4: Build, sanity check**
+- [ ] **Step 3: Build, sanity check**
 
 ```bash
 make build
 ./bin/mcp-gateway secret --help
+./bin/mcp-gateway secret list --help
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add cmd/mcp-gateway/secret.go cmd/mcp-gateway/main.go go.mod go.sum
-git commit -m "feat(cli): secret set|list|rm subcommands (stdin value, no echo)"
+git add cmd/mcp-gateway/secret.go cmd/mcp-gateway/main.go
+git commit -m "feat(cli): 'secret list' shows env-var references and set status"
 ```
 
 ---
@@ -3710,19 +3281,23 @@ mcp-gateway start                       # spawn the daemon (detached)
 mcp-gateway status                      # status from /admin/status
 mcp-gateway list                        # all servers + state + token cost
 
-# Add a server (prefix defaults to name)
+# Add a server (prefix defaults to name). Two patterns for credentials:
+
+# 1) Hardcoded — fastest, fine for a local-only config:
 mcp-gateway add github \
   --command npx --arg -y --arg @modelcontextprotocol/server-github \
-  --env GITHUB_TOKEN='${secret:github_token}'
+  --env GITHUB_TOKEN=ghp_xxx
+
+# 2) Pull from your shell env at spawn time:
+mcp-gateway add github \
+  --command npx --arg -y --arg @modelcontextprotocol/server-github \
+  --env GITHUB_TOKEN='${env:GITHUB_TOKEN}'
 
 mcp-gateway disable github              # stop the child but keep config
 mcp-gateway enable github               # start it again
 mcp-gateway rm github                   # remove from config
 
-# Secrets (stored in macOS Keychain; values never logged)
-echo "$TOKEN" | mcp-gateway secret set github_token
-mcp-gateway secret list
-mcp-gateway secret rm github_token
+mcp-gateway secret list                 # which env vars does the config want? are they set?
 
 mcp-gateway stop                        # SIGTERM via pidfile
 mcp-gateway restart                     # stop + start
@@ -3793,8 +3368,8 @@ Before considering Plan 02 done, confirm by hand:
 - [ ] `mcp-gateway add fs --command npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp` adds a server; within 3 seconds `tools/list` over `/mcp` returns `fs__*` tools.
 - [ ] `mcp-gateway disable fs` causes `tools/list` to return zero tools; `mcp-gateway enable fs` brings them back.
 - [ ] `mcp-gateway rm fs` removes the server from config and the daemon stops the child.
-- [ ] `echo "ghp_xxx" | mcp-gateway secret set github_token` succeeds; `grep -r 'ghp_xxx' ~/.mcp-gateway/` returns zero matches; `cat ~/.mcp-gateway/config.jsonc` does not contain the value.
-- [ ] `mcp-gateway secret list` shows `github_token (used by github)` (after `add github --env GITHUB_TOKEN='${secret:github_token}'`).
+- [ ] After `mcp-gateway add github --env GITHUB_TOKEN='${env:GITHUB_TOKEN}'`, `mcp-gateway secret list` shows `GITHUB_TOKEN ✓/✗ used by: github` reflecting whether `$GITHUB_TOKEN` is set in the daemon's env.
+- [ ] If `$GITHUB_TOKEN` is unset and you `add github --env GITHUB_TOKEN='${env:GITHUB_TOKEN}'`, daemon log shows `env resolution failed server=github` and the github server stays out of `tools/list` (no plaintext error).
 - [ ] `curl --unix-socket ~/.mcp-gateway/sock http://x/admin/events` streams events when other commands are issued.
 - [ ] `curl http://127.0.0.1:7823/admin/status` returns non-200 (admin endpoints not exposed on TCP).
 - [ ] `bin/mgw-smoke --port 7823` still passes (no v0.1 regression).
@@ -3809,5 +3384,5 @@ Before considering Plan 02 done, confirm by hand:
 - **First-run wizard `mcp-gateway init`** (Plan 04) — interactive setup that writes a commented template config + offers to install launchd plist.
 - **launchd plist** (Plan 04) — `~/Library/LaunchAgents/com.ayu5h-raj.mcp-gateway.plist` for auto-start on login.
 - **goreleaser, brew tap, install.sh** (Plan 04) — proper releases.
-- **Linux/Windows secret backends** — code-path is ready (just `Backend` interface implementations), gated by build tags.
+- **Keychain backend (deferred)** — `secret.Resolve` accepts `${env:NAME}` only in v0.2. The parser is scheme-aware so a future plan can add `${keychain:NAME}` (macOS) and `${secret-service:NAME}` (Linux) without breaking existing configs.
 - **Sampling/elicitation forwarding, OAuth passthrough, HTTP/SSE downstream MCPs, per-client tool scoping** — Plan 05+.
