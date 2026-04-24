@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -128,4 +129,57 @@ func TestSupervisor_BackoffHonoredAcrossUnrelatedWakes(t *testing.T) {
 	assert.LessOrEqual(t, snap.RestartCount-before, 1,
 		"backoff window was defeated: restart count jumped from %d to %d under unrelated wakeups",
 		before, snap.RestartCount)
+}
+
+func TestSupervisor_HookFiresOnTransitions(t *testing.T) {
+	type transition struct {
+		name string
+		prev State
+		next State
+	}
+	var mu sync.Mutex
+	var transitions []transition
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(SupervisorOpts{
+		LogDir:             t.TempDir(),
+		MaxRestartAttempts: 3,
+		BackoffMaxSeconds:  1,
+		Hook: func(name string, prev, next State, _ error) {
+			mu.Lock()
+			transitions = append(transitions, transition{name, prev, next})
+			mu.Unlock()
+		},
+	})
+	go s.Run(ctx)
+
+	s.Set("hooktest", ServerSpec{
+		Name:    "hooktest",
+		Command: "sh",
+		Args:    []string{"-c", "cat"},
+	})
+	waitState(t, s, "hooktest", StateRunning, 2*time.Second)
+
+	s.Remove("hooktest")
+	waitState(t, s, "hooktest", StateStopped, 2*time.Second)
+	cancel()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify we saw at least Starting→Running and Running→Stopped.
+	sawStartingToRunning := false
+	sawRunningToStopped := false
+	for _, tr := range transitions {
+		if tr.name == "hooktest" {
+			if tr.prev == StateStarting && tr.next == StateRunning {
+				sawStartingToRunning = true
+			}
+			if tr.prev == StateRunning && tr.next == StateStopped {
+				sawRunningToStopped = true
+			}
+		}
+	}
+	require.True(t, sawStartingToRunning, "expected Starting→Running hook: got %v", transitions)
+	assert.True(t, sawRunningToStopped, "expected Running→Stopped hook: got %v", transitions)
 }

@@ -40,6 +40,11 @@ type SupervisorOpts struct {
 	LogDir             string
 	MaxRestartAttempts int
 	BackoffMaxSeconds  int
+	// Hook, if non-nil, is called from the supervisor's manager goroutines
+	// whenever a server transitions state. prev and next are the state
+	// before/after the transition; err is non-nil for crash transitions.
+	// Hook is called AFTER releasing the internal mutex.
+	Hook func(name string, prev, next State, err error)
 }
 
 // server is the internal per-name state; goroutine-owned (one "manager" goroutine per name).
@@ -234,10 +239,14 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 		s.mu.Unlock()
 		return
 	}
+	prevState := srv.state
 	srv.state = StateStarting
 	spec := srv.spec
 	logDir := s.opts.LogDir
 	s.mu.Unlock()
+	if s.opts.Hook != nil {
+		s.opts.Hook(name, prevState, StateStarting, nil)
+	}
 
 	childCtx, cancel := context.WithCancel(parentCtx)
 	p, err := Spawn(childCtx, SpawnConfig{
@@ -251,17 +260,24 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 		cancel()
 		s.mu.Lock()
 		srv.lastErr = err
-		srv.state = StateErrored
+		prev2 := srv.state
 		srv.restarts++
 		if srv.restarts >= s.opts.MaxRestartAttempts {
 			srv.state = StateDisabled
 			srv.nextStartAt = time.Time{}
 			s.mu.Unlock()
+			if s.opts.Hook != nil {
+				s.opts.Hook(name, prev2, StateDisabled, err)
+			}
 			return
 		}
+		srv.state = StateErrored
 		d := srv.backoff.Next()
 		srv.nextStartAt = time.Now().Add(d)
 		s.mu.Unlock()
+		if s.opts.Hook != nil {
+			s.opts.Hook(name, prev2, StateErrored, err)
+		}
 		s.wake()
 		return
 	}
@@ -270,9 +286,13 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 	srv.proc = p
 	srv.cancel = cancel
 	srv.started = time.Now()
+	prev3 := srv.state
 	srv.state = StateRunning
 	srv.nextStartAt = time.Time{}
 	s.mu.Unlock()
+	if s.opts.Hook != nil {
+		s.opts.Hook(name, prev3, StateRunning, nil)
+	}
 
 	// Watch for exit.
 	go func() {
@@ -285,8 +305,12 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 			srv.cancel = nil
 		}
 		if !srv.desired {
+			prevExit := srv.state
 			srv.state = StateStopped
 			s.mu.Unlock()
+			if s.opts.Hook != nil {
+				s.opts.Hook(name, prevExit, StateStopped, nil)
+			}
 			s.wake()
 			return
 		}
@@ -299,16 +323,23 @@ func (s *Supervisor) startServer(parentCtx context.Context, name string) {
 		// Unexpected exit.
 		srv.lastErr = waitErr
 		srv.restarts++
+		prevCrash := srv.state
 		if srv.restarts >= s.opts.MaxRestartAttempts {
 			srv.state = StateDisabled
 			srv.nextStartAt = time.Time{}
 			s.mu.Unlock()
+			if s.opts.Hook != nil {
+				s.opts.Hook(name, prevCrash, StateDisabled, waitErr)
+			}
 			return
 		}
 		srv.state = StateErrored
 		d := srv.backoff.Next()
 		srv.nextStartAt = time.Now().Add(d)
 		s.mu.Unlock()
+		if s.opts.Hook != nil {
+			s.opts.Hook(name, prevCrash, StateErrored, waitErr)
+		}
 		s.wake()
 	}()
 }
