@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -84,13 +87,31 @@ func newStdioCmd() *cobra.Command {
 }
 
 func newStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var port int
+	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Print daemon status",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errors.New("status: not yet implemented")
+		Short: "Print daemon status (hits /mcp initialize)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+			req := []byte(`{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"status","version":"0"}}}`)
+			r, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, url, bytes.NewReader(req))
+			if err != nil {
+				return err
+			}
+			r.Header.Set("Content-Type", "application/json")
+			cli := &http.Client{Timeout: 2 * time.Second}
+			resp, err := cli.Do(r)
+			if err != nil {
+				return fmt.Errorf("daemon unreachable at %s: %w", url, err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			fmt.Printf("daemon: OK (port %d)\n%s\n", port, string(body))
+			return nil
 		},
 	}
+	cmd.Flags().IntVar(&port, "port", 7823, "daemon HTTP port")
+	return cmd
 }
 
 func main() {
