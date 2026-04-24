@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"context"
-	"encoding/json"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -101,14 +99,5 @@ func cmdAction(c *adminclient.Client, op, tgt string) tea.Cmd {
 	}
 }
 
-// cmdSubscribeEvents opens the SSE stream and feeds eventMsg into the program.
-// Reads in a goroutine until the program exits or the server disconnects; on
-// disconnect, emits eventStreamDisconnectedMsg (the poller will pick up the
-// daemon's return via subsequent tick retries).
-func cmdSubscribeEvents(ctx context.Context, sock string, send func(tea.Msg)) {
-	// Implemented in events.go. Stub here to keep msgs.go purely data.
-	_ = ctx
-	_ = sock
-	_ = send
-	_ = json.Marshal // placeholder import use; remove if unused after impl
-}
+// subscribeEvents (defined in events.go) runs the SSE loop that feeds
+// eventMsg / eventStreamDisconnectedMsg into the program.

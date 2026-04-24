@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -66,6 +67,13 @@ func Run(c *adminclient.Client, sock string) error {
 		toolsView:   newToolsModel(),
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	// Start SSE subscriber; it sends eventMsg / eventStreamDisconnectedMsg
+	// into the program via p.Send. Exits when ctx is cancelled.
+	ctx, cancel := context.WithCancel(context.Background())
+	go subscribeEvents(ctx, sock, func(msg tea.Msg) { p.Send(msg) })
+	defer cancel()
+
 	_, err := p.Run()
 	return err
 }
