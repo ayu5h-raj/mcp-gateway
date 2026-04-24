@@ -77,12 +77,14 @@ func (t toolsModel) view(m model) string {
 	)))
 	b.WriteString("\n")
 
-	show := t.tools
-	// Reserve ~8 rows for header+summary+preview.
-	if m.h > 0 && len(show) > m.h-9 {
-		show = show[:m.h-9]
+	// Window around the selected row so the viewport follows navigation.
+	pageSize := m.h - 9 // summary + col header + borders + description + statusline
+	if pageSize < 1 {
+		pageSize = len(t.tools)
 	}
-	for i, tl := range show {
+	start, end := windowAround(len(t.tools), t.selected, pageSize)
+	for i := start; i < end; i++ {
+		tl := t.tools[i]
 		line := fmt.Sprintf(" %*d  %-*s  %s",
 			tokenW, tl.EstTokens,
 			serverW, truncate(tl.Server, serverW),

@@ -65,7 +65,7 @@ func (s serversModel) handleKey(m model, k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (s serversModel) view(_ model) string {
+func (s serversModel) view(m model) string {
 	if len(s.servers) == 0 {
 		return "\n" + disabledText.Render("(no servers configured — try `mcp-gateway add`)") + "\n"
 	}
@@ -97,7 +97,14 @@ func (s serversModel) view(_ model) string {
 	b.WriteString("\n")
 
 	now := time.Now()
-	for i, srv := range s.servers {
+	// Window around the selected row so the viewport scrolls with navigation.
+	pageSize := m.h - 6 // col header + borders + header strip + statusline
+	if pageSize < 1 {
+		pageSize = len(s.servers)
+	}
+	start, end := windowAround(len(s.servers), s.selected, pageSize)
+	for i := start; i < end; i++ {
+		srv := s.servers[i]
 		age := "—"
 		if !srv.StartedAt.IsZero() {
 			age = shortDuration(now.Sub(srv.StartedAt)) + " ago"

@@ -117,6 +117,31 @@ func glyph(state string) string {
 	return "?"
 }
 
+// windowAround returns a [start, end) sub-range of n items that contains
+// selected and fits in pageSize. Keeps selected roughly centered so the
+// viewport scrolls as navigation reaches either edge.
+func windowAround(n, selected, pageSize int) (int, int) {
+	if pageSize <= 0 || pageSize >= n {
+		return 0, n
+	}
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= n {
+		selected = n - 1
+	}
+	start := selected - pageSize/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + pageSize
+	if end > n {
+		end = n
+		start = end - pageSize
+	}
+	return start, end
+}
+
 // --- backward-compat aliases for pre-polish callers (detail.go, tests).
 // Kept narrow so new code uses the named styles above.
 var (
