@@ -13,7 +13,7 @@
                                         ...
 ```
 
-**Status:** v0.2.0-alpha — full mutation CLI, admin RPC over UNIX socket, env-var resolver, pidfile-protected daemon lifecycle. TUI (Bubble Tea) is the next milestone (Plan 03).
+**Status:** v0.3.0-alpha — adds a k9s-style TUI (`mcp-gateway tui`) on top of the v0.2 substrate. Live observability + control from the terminal.
 
 ---
 
@@ -29,8 +29,8 @@ Several aggregators exist (MetaMCP, 1MCP, mcp-hub, mcp-proxy). This one is posit
 | Footprint | < 15 MB binary, runs on a phone | Docker Compose, Postgres, 2-4 GB RAM |
 
 Roadmap features that double down on this positioning:
-- TUI manager (Bubble Tea) — k9s-style live ops view (Plan 03)
-- Context-budget meter — surfaces the #1 unsolved MCP pain ("tool defs ate 72% of my context") (TUI surface)
+- TUI manager (Bubble Tea) — k9s-style live ops view ✅ **shipped in v0.3**
+- Context-budget meter — surfaces the #1 unsolved MCP pain ("tool defs ate 72% of my context") ✅ **Tools tab**
 - Single-binary distribution via Homebrew tap + curl-pipe-sh installer (Plan 04)
 
 ---
@@ -163,6 +163,20 @@ You can still hand-edit `~/.mcp-gateway/config.jsonc`; the daemon hot-reloads. T
 
 ---
 
+## TUI
+
+`mcp-gateway tui` opens a k9s-style live view of the running daemon:
+
+- **Servers tab** — all configured servers, their state, tool count, token cost. `j`/`k` to navigate, `enter` to drill in, `r` to restart, `t` to toggle enable/disable, `esc` to go back.
+- **Events tab** — streaming MCP request/response events + lifecycle events (`child.attached`, `child.crashed`, `tools.changed`, …) via live SSE from `/admin/events`.
+- **Tools tab** — all tools across all servers, sorted by estimated token cost. Answers "what's eating my context?"
+
+Press `?` for the key map, `q` to quit. Requires the daemon to be running; if it's not, the TUI shows `daemon disconnected` in the header and auto-reconnects when `mcp-gateway start` brings it back.
+
+![terminal-ui] *(screenshot coming)*
+
+---
+
 ## Verify
 
 A small smoke client ships in this repo. It drives the gateway through the full MCP lifecycle (`initialize` → `notifications/initialized` → `tools/list` → `ping` → optional `tools/call`) and reports PASS/FAIL per step:
@@ -206,7 +220,7 @@ The TUI (Bubble Tea, k9s-style) lands in **Plan 03** — see [the design spec](d
 
 ---
 
-## What works in v0.2
+## What works in v0.3
 
 - ✅ Aggregate N stdio MCP servers behind one endpoint
 - ✅ Streamable HTTP `POST /mcp` for HTTP-capable clients
@@ -221,12 +235,12 @@ The TUI (Bubble Tea, k9s-style) lands in **Plan 03** — see [the design spec](d
 - ✅ **Admin RPC** over UNIX socket (`/admin/{status,servers,tools,events,secret,config}`); SSE on `/admin/events`
 - ✅ **`${env:NAME}` resolver** in config env values (and `secret list` to see what's referenced + whether each is set)
 - ✅ **In-process event bus** + ring buffer (substrate for the TUI)
-- ✅ **Token-cost estimator** (chars/4 heuristic; surfaced in `mcp-gateway list`)
+- ✅ **Token-cost estimator** (chars/4 heuristic; surfaced in `mcp-gateway list` and the TUI Tools tab)
+- ✅ **k9s-style TUI** — `mcp-gateway tui` with Servers / Events / Tools tabs, live via SSE + 2s polling
 - ✅ macOS + Linux
 
-## What's deferred (Plan 03 / 04 / later)
+## What's deferred (Plan 04 / later)
 
-- **Plan 03:** TUI (Bubble Tea, k9s-style) — 5 tabs; subscribes to `/admin/events`
 - **Plan 04:** First-run wizard, launchd plist, goreleaser, Homebrew tap, install.sh
 - **Later:** macOS Keychain (and Linux/Windows) secret backends — the parser is scheme-aware so adding `${keychain:NAME}` is non-breaking
 - **Later:** HTTP / SSE downstream MCP servers (currently stdio only)
