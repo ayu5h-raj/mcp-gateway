@@ -83,17 +83,51 @@ func (t toolsModel) view(m model) string {
 		pageSize = len(t.tools)
 	}
 	start, end := windowAround(len(t.tools), t.selected, pageSize)
+
+	// Figure out the widest tool name in the visible window so names align
+	// into a tidy column without a hardcoded width cap.
+	nameW := 0
+	for i := start; i < end; i++ {
+		if l := len(t.tools[i].Name); l > nameW {
+			nameW = l
+		}
+	}
+	if nameW < 20 {
+		nameW = 20
+	}
+
+	// Reserve the remaining terminal width for an inline description column.
+	// Panel chrome: 2 border + 2 padding + 2 for the bar+space prefix.
+	descW := m.w - 6 - (1 + tokenW + 2 + serverW + 2 + nameW + 3) // "  —  " = 5 chars approx
+	if descW < 10 {
+		descW = 0
+	}
+
 	for i := start; i < end; i++ {
 		tl := t.tools[i]
-		line := fmt.Sprintf(" %*d  %-*s  %s",
+		name := padRight(tl.Name, nameW)
+		base := fmt.Sprintf(" %*d  %-*s  %s",
 			tokenW, tl.EstTokens,
 			serverW, truncate(tl.Server, serverW),
-			tl.Name,
+			name,
 		)
+		var line string
+		if descW > 0 && tl.Description != "" {
+			descTxt := truncate(strings.ReplaceAll(tl.Description, "\n", " "), descW)
+			line = base + "  " + mutedText.Render("— "+descTxt)
+		} else {
+			line = base
+		}
 		bar := unselectedBar
 		if i == t.selected {
 			bar = selectedBar
-			line = selectedRow.Render(line)
+			// Apply selectedRow only to the columns; keep the description muted.
+			if descW > 0 && tl.Description != "" {
+				descTxt := truncate(strings.ReplaceAll(tl.Description, "\n", " "), descW)
+				line = selectedRow.Render(base) + "  " + mutedText.Render("— "+descTxt)
+			} else {
+				line = selectedRow.Render(base)
+			}
 		}
 		b.WriteString(bar)
 		b.WriteString(line)
