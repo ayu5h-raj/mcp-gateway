@@ -13,7 +13,7 @@
                                         ...
 ```
 
-**Status:** v0.1.0-alpha — works end-to-end (proven on Claude Desktop with `kite`). TUI, secrets management, and `add`/`rm` CLI commands are scoped for v0.2.
+**Status:** v0.2.0-alpha — full mutation CLI, admin RPC over UNIX socket, env-var resolver, pidfile-protected daemon lifecycle. TUI (Bubble Tea) is the next milestone (Plan 03).
 
 ---
 
@@ -29,9 +29,9 @@ Several aggregators exist (MetaMCP, 1MCP, mcp-hub, mcp-proxy). This one is posit
 | Footprint | < 15 MB binary, runs on a phone | Docker Compose, Postgres, 2-4 GB RAM |
 
 Roadmap features that double down on this positioning:
-- TUI manager (Bubble Tea) — k9s-style live ops view
-- Context-budget meter — surfaces the #1 unsolved MCP pain ("tool defs ate 72% of my context")
-- macOS Keychain–backed secrets — no more API keys in JSON
+- TUI manager (Bubble Tea) — k9s-style live ops view (Plan 03)
+- Context-budget meter — surfaces the #1 unsolved MCP pain ("tool defs ate 72% of my context") (TUI surface)
+- Single-binary distribution via Homebrew tap + curl-pipe-sh installer (Plan 04)
 
 ---
 
@@ -46,7 +46,7 @@ make build
 ./bin/mcp-gateway --help
 ```
 
-### Pre-built (coming in v0.2)
+### Pre-built (coming in v1.0 — Plan 04)
 
 ```bash
 brew install ayu5h-raj/mcp-gateway/mcp-gateway
@@ -199,39 +199,41 @@ ls   ~/.mcp-gateway/servers/
 tail -f ~/.mcp-gateway/servers/github.log
 
 # quick health check
-mcp-gateway status --port 7823
+mcp-gateway status
 ```
 
-The TUI (Bubble Tea, k9s-style) lands in v0.2 — see [Plan 02 in `docs/`](docs/superpowers/specs/2026-04-23-mcp-gateway-design.md).
+The TUI (Bubble Tea, k9s-style) lands in **Plan 03** — see [the design spec](docs/superpowers/specs/2026-04-23-mcp-gateway-design.md) and [Plan 02](docs/superpowers/plans/2026-04-24-mcp-gateway-plan-02-substrate.md) for what shipped in v0.2.
 
 ---
 
-## What works in v0.1
+## What works in v0.2
 
 - ✅ Aggregate N stdio MCP servers behind one endpoint
 - ✅ Streamable HTTP `POST /mcp` for HTTP-capable clients
 - ✅ Stdio bridge for Claude Desktop and other stdio-only clients
 - ✅ Tools, resources, prompts — all merged with `<server>__<tool>` prefixing
-- ✅ Hot reload on config change
+- ✅ Hot reload on config change (fsnotify)
 - ✅ Process supervisor with exponential backoff, process-group isolation, per-child stderr capture
 - ✅ Graceful child-exit handling — inflight requests get JSON-RPC errors, not parked goroutines
 - ✅ Concurrent-safe MCP client (write mutex, callback mutex)
+- ✅ **Pidfile-protected daemon** — `mcp-gateway start` / `stop` / `restart` / `status`
+- ✅ **Mutation CLI** — `add` / `rm` / `enable` / `disable` / `list`
+- ✅ **Admin RPC** over UNIX socket (`/admin/{status,servers,tools,events,secret,config}`); SSE on `/admin/events`
+- ✅ **`${env:NAME}` resolver** in config env values (and `secret list` to see what's referenced + whether each is set)
+- ✅ **In-process event bus** + ring buffer (substrate for the TUI)
+- ✅ **Token-cost estimator** (chars/4 heuristic; surfaced in `mcp-gateway list`)
 - ✅ macOS + Linux
 
-## What's deferred (v0.2 / v1)
+## What's deferred (Plan 03 / 04 / later)
 
-- TUI (Bubble Tea) for live ops
-- `mcp-gateway add` / `rm` / `enable` / `disable` / `secret` CLI subcommands
-- macOS Keychain–backed `${secret:NAME}` resolver
-- Admin RPC over UNIX socket (the TUI's surface)
-- Context-budget meter (token-cost estimate per server / per tool)
-- First-run wizard, launchd plist
-- Goreleaser, Homebrew tap
-- HTTP / SSE downstream MCP servers (currently stdio only)
-- OAuth passthrough for remote MCPs (GitHub, Slack, Notion)
-- Sampling and elicitation forwarding (server → client requests)
-- Per-client tool scoping
-- Windows
+- **Plan 03:** TUI (Bubble Tea, k9s-style) — 5 tabs; subscribes to `/admin/events`
+- **Plan 04:** First-run wizard, launchd plist, goreleaser, Homebrew tap, install.sh
+- **Later:** macOS Keychain (and Linux/Windows) secret backends — the parser is scheme-aware so adding `${keychain:NAME}` is non-breaking
+- **Later:** HTTP / SSE downstream MCP servers (currently stdio only)
+- **Later:** OAuth passthrough for remote MCPs (GitHub, Slack, Notion)
+- **Later:** Sampling and elicitation forwarding (server → client requests)
+- **Later:** Per-client tool scoping
+- **Later:** Windows
 
 ---
 
