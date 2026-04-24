@@ -1,6 +1,7 @@
 # Binaries
 bin/
 /mcp-gateway
+/fakechildbin
 
 # Test output
 *.out
