@@ -29,10 +29,12 @@ import (
 // We use the stricter macOS limit to stay portable.
 const unixMaxPath = 103
 
-// chooseSocketPath returns the UNIX socket path for home. If the natural
+// ChooseSocketPath returns the UNIX socket path for home. If the natural
 // path (home/sock) would exceed the platform AF_UNIX limit, a short
 // /tmp-based path derived from a hash of home is used instead.
-func chooseSocketPath(home string) string {
+// Exported so CLI commands (start, stop, status) can compute the same path
+// without duplicating the fallback logic.
+func ChooseSocketPath(home string) string {
 	natural := filepath.Join(home, "sock")
 	if len(natural) <= unixMaxPath {
 		return natural
@@ -116,7 +118,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	d.startedAt = time.Now()
 	d.httpPort = initial.Daemon.HTTPPort
-	d.socketPath = chooseSocketPath(d.Home)
+	d.socketPath = ChooseSocketPath(d.Home)
 	// Remove any stale socket file from a previous unclean shutdown.
 	_ = os.Remove(d.socketPath)
 

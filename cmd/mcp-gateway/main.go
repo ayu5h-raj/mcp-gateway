@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ayu5h-raj/mcp-gateway/internal/admin"
+	"github.com/ayu5h-raj/mcp-gateway/internal/adminclient"
 	"github.com/ayu5h-raj/mcp-gateway/internal/bridge"
 	"github.com/ayu5h-raj/mcp-gateway/internal/daemon"
 )
@@ -34,6 +33,9 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newStdioCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newStartCmd())
+	root.AddCommand(newStopCmd())
+	root.AddCommand(newRestartCmd())
 	root.AddCommand(newListCmd())
 	root.AddCommand(newAddCmd())
 	root.AddCommand(newRmCmd())
@@ -93,31 +95,29 @@ func newStdioCmd() *cobra.Command {
 }
 
 func newStatusCmd() *cobra.Command {
-	var port int
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "status",
-		Short: "Print daemon status (hits /mcp initialize)",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
-			req := []byte(`{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"status","version":"0"}}}`)
-			r, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, url, bytes.NewReader(req))
-			if err != nil {
+		Short: "Print daemon status (via /admin/status over UNIX socket)",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			home, _ := os.UserHomeDir()
+			daemonHome := filepath.Join(home, ".mcp-gateway")
+			sock := daemon.ChooseSocketPath(daemonHome)
+			if _, err := os.Stat(sock); err != nil {
+				return fmt.Errorf("daemon not running (no socket at %s)", sock)
+			}
+			c := adminclient.New(sock)
+			var st admin.Status
+			if err := c.Get("/admin/status", &st); err != nil {
 				return err
 			}
-			r.Header.Set("Content-Type", "application/json")
-			cli := &http.Client{Timeout: 2 * time.Second}
-			resp, err := cli.Do(r)
-			if err != nil {
-				return fmt.Errorf("daemon unreachable at %s: %w", url, err)
-			}
-			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
-			fmt.Printf("daemon: OK (port %d)\n%s\n", port, string(body))
+			fmt.Printf("daemon: OK (pid=%d, port=%d, version=%s, started=%s)\n",
+				st.PID, st.HTTPPort, st.Version, st.StartedAt.Format(time.RFC3339))
+			fmt.Printf("  servers: %d, tools: %d\n", st.NumServers, st.NumTools)
+			fmt.Printf("  config:  %s\n", st.ConfigPath)
+			fmt.Printf("  socket:  %s\n", st.SocketPath)
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&port, "port", 7823, "daemon HTTP port")
-	return cmd
 }
 
 func main() {
