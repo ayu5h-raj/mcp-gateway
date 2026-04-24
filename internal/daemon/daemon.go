@@ -220,12 +220,23 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 // reconcile synchronizes supervisor + aggregator with the latest config.
+//
+// Lock hygiene: d.mu is held only while mutating daemon state. Blocking
+// JSON-RPC calls (client.Initialize, agg.RefreshAll) happen OUTSIDE the
+// lock so a slow downstream child cannot starve admin endpoints, the
+// attach loop, or subsequent reconciles. Bounded by 5s per call so a
+// wedged child errors out rather than hanging reconcile forever.
 func (d *Daemon) reconcile(ctx context.Context, cfg *config.Config) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.cfg = cfg
+	type attachWant struct{ name, prefix string }
 
+	// Phase 1 — identify work under lock; update supervisor spec; release.
+	d.mu.Lock()
+	d.cfg = cfg
 	wanted := map[string]struct{}{}
+	var toAttach []attachWant
+	var prefixesToRemove []string
+	var namesToRemove []string
+
 	for name, s := range cfg.MCPServers {
 		if !s.Enabled {
 			continue
@@ -246,31 +257,61 @@ func (d *Daemon) reconcile(ctx context.Context, cfg *config.Config) {
 			Env:     resolvedEnv,
 		})
 		if _, ok := d.clients[prefix]; !ok {
-			if p := d.sup.Process(name); p != nil {
-				client := mcpchild.New(name, p.Stdin, p.Stdout)
-				if err := client.Initialize(ctx); err != nil {
-					d.Logger.Error("initialize child", "server", name, "err", err)
-					continue
-				}
-				d.clients[prefix] = client
-				d.agg.AddServer(prefix, client)
-				if err := d.agg.RefreshAll(ctx); err != nil {
-					d.Logger.Error("refresh", "err", err)
-				}
-			}
-			// If process not yet up, attachLoop will retry.
+			toAttach = append(toAttach, attachWant{name, prefix})
 		}
 	}
 	for prefix := range d.clients {
 		if _, keep := wanted[prefix]; !keep {
-			d.agg.RemoveServer(prefix)
-			delete(d.clients, prefix)
+			prefixesToRemove = append(prefixesToRemove, prefix)
 			for name, s := range cfg.MCPServers {
 				if config.EffectivePrefix(name, s) == prefix {
-					d.sup.Remove(name)
+					namesToRemove = append(namesToRemove, name)
 				}
 			}
 		}
+	}
+	sup := d.sup
+	agg := d.agg
+	d.mu.Unlock()
+
+	// Phase 2 — tear down servers no longer wanted (no blocking calls).
+	for _, prefix := range prefixesToRemove {
+		agg.RemoveServer(prefix)
+		d.mu.Lock()
+		delete(d.clients, prefix)
+		d.mu.Unlock()
+	}
+	for _, name := range namesToRemove {
+		sup.Remove(name)
+	}
+
+	// Phase 3 — attach new clients with bounded timeouts; NO lock held.
+	for _, w := range toAttach {
+		p := sup.Process(w.name)
+		if p == nil {
+			continue // attachLoop will retry once the process is up
+		}
+		client := mcpchild.New(w.name, p.Stdin, p.Stdout)
+		ictx, icancel := context.WithTimeout(ctx, 5*time.Second)
+		err := client.Initialize(ictx)
+		icancel()
+		if err != nil {
+			d.Logger.Error("initialize child", "server", w.name, "err", err)
+			continue
+		}
+		d.mu.Lock()
+		if _, exists := d.clients[w.prefix]; exists {
+			d.mu.Unlock()
+			continue
+		}
+		d.clients[w.prefix] = client
+		d.mu.Unlock()
+		agg.AddServer(w.prefix, client)
+		rctx, rcancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := agg.RefreshAll(rctx); err != nil {
+			d.Logger.Warn("refresh", "err", err)
+		}
+		rcancel()
 	}
 }
 
