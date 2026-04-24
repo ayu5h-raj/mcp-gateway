@@ -42,6 +42,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newEnableCmd())
 	root.AddCommand(newDisableCmd())
 	root.AddCommand(newSecretCmd())
+	root.AddCommand(newTUICmd())
 	return root
 }
 
