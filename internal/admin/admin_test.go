@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -231,4 +232,62 @@ func TestAdmin_EventsSSEStreamsPublishedEvents(t *testing.T) {
 	}
 	assert.True(t, saw, "should have read at least one SSE data: frame")
 	_ = supervisor.StateRunning // silence import
+}
+
+func TestAdmin_POSTAddServer(t *testing.T) {
+	d := newMockDaemon()
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	body := `{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"enabled":true}`
+	resp, err := http.Post(srv.URL+"/admin/servers", "application/json", bytes.NewReader([]byte(body)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	require.Len(t, d.addCalls, 1)
+	assert.Equal(t, "github", d.addCalls[0].Name)
+}
+
+func TestAdmin_DELETEServer(t *testing.T) {
+	d := newMockDaemon()
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/admin/servers/github", nil)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, []string{"github"}, d.removed)
+}
+
+func TestAdmin_POSTEnableDisable(t *testing.T) {
+	d := newMockDaemon()
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/admin/servers/github/enable", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, []string{"github"}, d.enabled)
+
+	resp, err = http.Post(srv.URL+"/admin/servers/github/disable", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, []string{"github"}, d.disabled)
+}
+
+func TestAdmin_POSTReload(t *testing.T) {
+	d := newMockDaemon()
+	srv := httptest.NewServer(NewHandler(d))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/admin/reload", "", nil)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, 1, d.reloads)
 }
