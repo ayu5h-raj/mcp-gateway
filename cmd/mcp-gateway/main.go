@@ -1,11 +1,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ayushraj/mcp-gateway/internal/daemon"
 )
 
 // version is set at build time via -ldflags.
@@ -27,13 +34,34 @@ func newRootCmd() *cobra.Command {
 }
 
 func newDaemonCmd() *cobra.Command {
-	return &cobra.Command{
+	var home string
+	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run the mcp-gateway daemon (long-running)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errors.New("daemon: not yet implemented")
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if home == "" {
+				h, err := os.UserHomeDir()
+				if err != nil {
+					return err
+				}
+				home = filepath.Join(h, ".mcp-gateway")
+			}
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			d := daemon.New(home, logger)
+
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-sigCh
+				cancel()
+			}()
+			return d.Run(ctx)
 		},
 	}
+	cmd.Flags().StringVar(&home, "home", "", "path to ~/.mcp-gateway (default: $HOME/.mcp-gateway)")
+	return cmd
 }
 
 func newStdioCmd() *cobra.Command {
