@@ -1,0 +1,249 @@
+# mcp-gateway
+
+> Local-first MCP aggregator. One config, one binary, every MCP server.
+
+`mcp-gateway` runs as a single Go binary on your machine. You configure all your [Model Context Protocol](https://modelcontextprotocol.io) servers in **one** place; every MCP-capable app (Claude Desktop, Cursor, Claude Code, VS Code, Zed, Windsurf, …) just points at the gateway and gets all of them.
+
+```
+ Claude Desktop ──┐
+ Cursor ──────────┤──► mcp-gateway ──► github
+ Claude Code ─────┤      (one binary)   filesystem
+ VS Code ─────────┘                     kite
+                                        slack
+                                        ...
+```
+
+**Status:** v0.1.0-alpha — works end-to-end (proven on Claude Desktop with `kite`). TUI, secrets management, and `add`/`rm` CLI commands are scoped for v0.2.
+
+---
+
+## Why another MCP gateway?
+
+Several aggregators exist (MetaMCP, 1MCP, mcp-hub, mcp-proxy). This one is positioned differently:
+
+| | mcp-gateway | Most others |
+|---|---|---|
+| Distribution | single static Go binary, `brew` / `curl \| sh` | Docker / Node / Python required |
+| Config | one JSONC file, hot-reloaded | web UI, database, often both |
+| Tool name strategy | `<server>__<tool>` (matches Claude convention) | varies |
+| Footprint | < 15 MB binary, runs on a phone | Docker Compose, Postgres, 2-4 GB RAM |
+
+Roadmap features that double down on this positioning:
+- TUI manager (Bubble Tea) — k9s-style live ops view
+- Context-budget meter — surfaces the #1 unsolved MCP pain ("tool defs ate 72% of my context")
+- macOS Keychain–backed secrets — no more API keys in JSON
+
+---
+
+## Install
+
+### From source (works today)
+
+```bash
+git clone https://github.com/ayu5h-raj/mcp-gateway
+cd mcp-gateway
+make build
+./bin/mcp-gateway --help
+```
+
+### Pre-built (coming in v0.2)
+
+```bash
+brew install ayu5h-raj/mcp-gateway/mcp-gateway
+# or
+curl -fsSL https://raw.githubusercontent.com/ayu5h-raj/mcp-gateway/main/install.sh | sh
+```
+
+---
+
+## Configure
+
+Create `~/.mcp-gateway/config.jsonc`:
+
+```jsonc
+{
+  "version": 1,
+
+  "daemon": {
+    "http_port": 7823,
+    "log_level": "info"
+  },
+
+  // Same shape as Claude Desktop's mcpServers — paste blocks in directly.
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_..." },
+      "enabled": true
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Documents"],
+      "enabled": true
+    }
+  }
+}
+```
+
+The file is **hot-reloaded** via `fsnotify` — edit + save and the daemon reconciles without a restart.
+
+---
+
+## Run
+
+```bash
+mcp-gateway daemon
+# INFO mcp-gateway listening addr=127.0.0.1:7823
+# INFO attached server=github prefix=github
+# INFO attached server=filesystem prefix=filesystem
+```
+
+Tools end up exposed as `<server>__<tool>` — e.g. `github__create_issue`, `filesystem__read_file`.
+
+---
+
+## Connect a client
+
+### Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "gateway": {
+      "command": "/usr/local/bin/mcp-gateway",
+      "args": ["stdio", "--port", "7823"]
+    }
+  }
+}
+```
+
+`mcp-gateway stdio` is a thin bridge: stdio in → HTTP POST to the daemon → response back on stdout. One bridge process per Claude session, but only one daemon.
+
+### Cursor / Claude Code / VS Code / Zed (HTTP-capable)
+
+Point them directly at the daemon's Streamable HTTP endpoint:
+
+```json
+{ "mcpServers": { "gateway": { "url": "http://127.0.0.1:7823/mcp" } } }
+```
+
+---
+
+## Verify
+
+A small smoke client ships in this repo. It drives the gateway through the full MCP lifecycle (`initialize` → `notifications/initialized` → `tools/list` → `ping` → optional `tools/call`) and reports PASS/FAIL per step:
+
+```bash
+go build -o bin/mgw-smoke ./cmd/mgw-smoke
+./bin/mgw-smoke --port 7823
+# PASS initialize       server=mcp-gateway/0.1
+# PASS notifications/initialized   no reply (correct)
+# PASS tools/list       22 tools: kite__cancel_order, …
+# PASS resources/list   0 resources
+# PASS prompts/list     0 prompts
+# PASS ping             ack
+# PASS notifications/cancelled   no reply (correct)
+# SMOKE PASSED
+```
+
+Invoke a real tool:
+
+```bash
+./bin/mgw-smoke --port 7823 --call kite__get_holdings --args '{}'
+```
+
+---
+
+## Observe
+
+```bash
+# daemon's own log
+tail -f /tmp/mgw-daemon.log
+
+# per-child stderr (everything the downstream MCP server prints)
+ls   ~/.mcp-gateway/servers/
+tail -f ~/.mcp-gateway/servers/github.log
+
+# quick health check
+mcp-gateway status --port 7823
+```
+
+The TUI (Bubble Tea, k9s-style) lands in v0.2 — see [Plan 02 in `docs/`](docs/superpowers/specs/2026-04-23-mcp-gateway-design.md).
+
+---
+
+## What works in v0.1
+
+- ✅ Aggregate N stdio MCP servers behind one endpoint
+- ✅ Streamable HTTP `POST /mcp` for HTTP-capable clients
+- ✅ Stdio bridge for Claude Desktop and other stdio-only clients
+- ✅ Tools, resources, prompts — all merged with `<server>__<tool>` prefixing
+- ✅ Hot reload on config change
+- ✅ Process supervisor with exponential backoff, process-group isolation, per-child stderr capture
+- ✅ Graceful child-exit handling — inflight requests get JSON-RPC errors, not parked goroutines
+- ✅ Concurrent-safe MCP client (write mutex, callback mutex)
+- ✅ macOS + Linux
+
+## What's deferred (v0.2 / v1)
+
+- TUI (Bubble Tea) for live ops
+- `mcp-gateway add` / `rm` / `enable` / `disable` / `secret` CLI subcommands
+- macOS Keychain–backed `${secret:NAME}` resolver
+- Admin RPC over UNIX socket (the TUI's surface)
+- Context-budget meter (token-cost estimate per server / per tool)
+- First-run wizard, launchd plist
+- Goreleaser, Homebrew tap
+- HTTP / SSE downstream MCP servers (currently stdio only)
+- OAuth passthrough for remote MCPs (GitHub, Slack, Notion)
+- Sampling and elicitation forwarding (server → client requests)
+- Per-client tool scoping
+- Windows
+
+---
+
+## Architecture
+
+Two processes, one binary:
+
+- **`mcp-gateway daemon`** — long-running. Reads config, supervises stdio MCP children, exposes one merged endpoint via Streamable HTTP on `127.0.0.1:7823/mcp`.
+- **`mcp-gateway stdio`** — a thin newline-framed bridge. Spawned by stdio-only clients (Claude Desktop). Stateless.
+
+Internal layout:
+
+```
+cmd/
+  mcp-gateway/        # Cobra dispatcher (daemon, stdio, status)
+  mgw-smoke/          # standalone MCP client for verification
+internal/
+  config/             # JSONC parser + validator + fsnotify watcher
+  supervisor/         # process state machine + exponential backoff + pgid signaling
+  mcpchild/           # JSON-RPC MCP client over stdio pipes
+  aggregator/         # merges + prefixes + routes tools/resources/prompts
+  daemon/             # wires everything; serves POST /mcp
+  bridge/             # stdio ↔ HTTP proxy
+```
+
+Full architecture, design rationale, and roadmap: [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`docs/superpowers/plans/`](docs/superpowers/plans/).
+
+---
+
+## Develop
+
+```bash
+make build      # bin/mcp-gateway
+make test       # unit + integration, race-detector enabled
+make e2e        # builds binary, spawns child, drives full lifecycle
+make lint       # golangci-lint v1.64.8 (CI-pinned)
+make vet        # go vet
+```
+
+CI runs lint + tests on `ubuntu-latest` and `macos-latest`. See `.github/workflows/ci.yml`.
+
+The repo ships with [`docs/superpowers/`](docs/superpowers/) — the original design spec and step-by-step implementation plan that produced this code (under TDD with two-stage subagent code review). Useful as both documentation and a reference for how to do agent-assisted development on a non-trivial Go project.
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).

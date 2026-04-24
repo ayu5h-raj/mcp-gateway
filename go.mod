@@ -1,4 +1,4 @@
-module github.com/ayushraj/mcp-gateway
+module github.com/ayu5h-raj/mcp-gateway
 
 go 1.25.0
 

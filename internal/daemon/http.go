@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ayushraj/mcp-gateway/internal/aggregator"
+	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
 )
 
 // NewMCPHandler returns an http.Handler that implements the POST /mcp half of

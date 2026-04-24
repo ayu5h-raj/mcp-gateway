@@ -91,16 +91,16 @@ mcp-gateway/
 - Create: `go.mod`
 - Create: `.gitignore`
 
-- [ ] **Step 1:** Run `go mod init github.com/ayushraj/mcp-gateway` at the repo root.
+- [ ] **Step 1:** Run `go mod init github.com/ayu5h-raj/mcp-gateway` at the repo root.
 
 ```bash
-go mod init github.com/ayushraj/mcp-gateway
+go mod init github.com/ayu5h-raj/mcp-gateway
 ```
 
 Expected output:
 
 ```
-go: creating new go.mod: module github.com/ayushraj/mcp-gateway
+go: creating new go.mod: module github.com/ayu5h-raj/mcp-gateway
 ```
 
 - [ ] **Step 2:** Create `.gitignore`:
@@ -138,7 +138,7 @@ cat go.mod
 Expected:
 
 ```
-module github.com/ayushraj/mcp-gateway
+module github.com/ayu5h-raj/mcp-gateway
 
 go 1.23
 ```
@@ -161,7 +161,7 @@ git commit -m "chore: initialize Go module"
 .PHONY: build install test cover lint vet fmt tidy clean e2e
 
 BINARY := mcp-gateway
-PKG := github.com/ayushraj/mcp-gateway
+PKG := github.com/ayu5h-raj/mcp-gateway
 BIN_DIR := bin
 
 build:
@@ -2303,7 +2303,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ayushraj/mcp-gateway/internal/testutil/fakechild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/testutil/fakechild"
 )
 
 // newPipedChild creates a goroutine-hosted fake stdio MCP server and returns
@@ -2851,8 +2851,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
-	"github.com/ayushraj/mcp-gateway/internal/testutil/fakechild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/testutil/fakechild"
 )
 
 func newClient(t *testing.T, name string, tools []fakechild.Tool) (*mcpchild.Client, func()) {
@@ -2966,7 +2966,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
 )
 
 // Aggregator merges tools/resources/prompts from N child MCP clients and
@@ -3304,9 +3304,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ayushraj/mcp-gateway/internal/aggregator"
-	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
-	"github.com/ayushraj/mcp-gateway/internal/testutil/fakechild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
+	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/testutil/fakechild"
 )
 
 func setupAggregator(t *testing.T) *aggregator.Aggregator {
@@ -3428,7 +3428,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ayushraj/mcp-gateway/internal/aggregator"
+	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
 )
 
 // NewMCPHandler returns an http.Handler that implements the POST /mcp half of
@@ -3631,10 +3631,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ayushraj/mcp-gateway/internal/aggregator"
-	"github.com/ayushraj/mcp-gateway/internal/config"
-	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
-	"github.com/ayushraj/mcp-gateway/internal/supervisor"
+	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
+	"github.com/ayu5h-raj/mcp-gateway/internal/config"
+	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/supervisor"
 )
 
 // Daemon wires config → supervisor → aggregator → HTTP server.
@@ -3858,7 +3858,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/ayushraj/mcp-gateway/internal/daemon"
+	"github.com/ayu5h-raj/mcp-gateway/internal/daemon"
 	"github.com/spf13/cobra"
 )
 ```
@@ -4028,7 +4028,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/ayushraj/mcp-gateway/internal/testutil/fakechild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/testutil/fakechild"
 )
 
 func main() {
@@ -4385,7 +4385,7 @@ func newStdioCmd() *cobra.Command {
 - [ ] **Step 2:** Add the bridge import to `main.go`:
 
 ```go
-"github.com/ayushraj/mcp-gateway/internal/bridge"
+"github.com/ayu5h-raj/mcp-gateway/internal/bridge"
 ```
 
 - [ ] **Step 3:** Build:

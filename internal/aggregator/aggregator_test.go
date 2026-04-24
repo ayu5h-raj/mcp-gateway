@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
-	"github.com/ayushraj/mcp-gateway/internal/testutil/fakechild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/testutil/fakechild"
 )
 
 func newClient(t *testing.T, name string, tools []fakechild.Tool) (*mcpchild.Client, func()) {

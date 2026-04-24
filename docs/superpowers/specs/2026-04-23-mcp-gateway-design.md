@@ -434,7 +434,7 @@ Default Lipgloss palette, respect `NO_COLOR`, graceful degradation on 16-color t
 ### Toolchain
 
 - **Go 1.23+.**
-- **Module path:** `github.com/ayushraj/mcp-gateway` (adjust if user has different GitHub org).
+- **Module path:** `github.com/ayu5h-raj/mcp-gateway` (adjust if user has different GitHub org).
 - **Layout:**
   ```
   mcp-gateway/
@@ -500,7 +500,7 @@ GitHub Actions:
 - **GitHub Releases via goreleaser**: `darwin-arm64`, `darwin-amd64`, `linux-amd64`, `linux-arm64`, `windows-amd64` (Windows is unsupported at runtime but the build validates portability).
 - **Homebrew tap**: `brew install ayushraj/mcp-gateway/mcp-gateway`. Tap repo auto-updated by goreleaser.
 - **Install script**: `curl -fsSL https://raw.githubusercontent.com/ayushraj/mcp-gateway/main/install.sh | sh` — single-script installer.
-- **`go install github.com/ayushraj/mcp-gateway/cmd/mcp-gateway@latest`** for Go users.
+- **`go install github.com/ayu5h-raj/mcp-gateway/cmd/mcp-gateway@latest`** for Go users.
 
 ### First-run UX
 

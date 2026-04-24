@@ -1,7 +1,7 @@
 .PHONY: build install test cover lint vet fmt tidy clean e2e
 
 BINARY := mcp-gateway
-PKG := github.com/ayushraj/mcp-gateway
+PKG := github.com/ayu5h-raj/mcp-gateway
 BIN_DIR := bin
 
 build:

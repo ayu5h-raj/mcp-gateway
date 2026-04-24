@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/ayushraj/mcp-gateway/internal/testutil/fakechild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/testutil/fakechild"
 )
 
 func main() {

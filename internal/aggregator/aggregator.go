@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
 )
 
 // Aggregator merges tools/resources/prompts from N child MCP clients and

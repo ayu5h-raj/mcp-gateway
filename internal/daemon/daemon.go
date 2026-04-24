@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ayushraj/mcp-gateway/internal/aggregator"
-	"github.com/ayushraj/mcp-gateway/internal/config"
-	"github.com/ayushraj/mcp-gateway/internal/mcpchild"
-	"github.com/ayushraj/mcp-gateway/internal/supervisor"
+	"github.com/ayu5h-raj/mcp-gateway/internal/aggregator"
+	"github.com/ayu5h-raj/mcp-gateway/internal/config"
+	"github.com/ayu5h-raj/mcp-gateway/internal/mcpchild"
+	"github.com/ayu5h-raj/mcp-gateway/internal/supervisor"
 )
 
 // Daemon orchestrates the config watcher, supervisor, aggregator, and HTTP server.

@@ -15,8 +15,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ayushraj/mcp-gateway/internal/bridge"
-	"github.com/ayushraj/mcp-gateway/internal/daemon"
+	"github.com/ayu5h-raj/mcp-gateway/internal/bridge"
+	"github.com/ayu5h-raj/mcp-gateway/internal/daemon"
 )
 
 // version is set at build time via -ldflags.
