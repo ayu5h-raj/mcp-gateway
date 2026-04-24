@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ayushraj/mcp-gateway/internal/bridge"
 	"github.com/ayushraj/mcp-gateway/internal/daemon"
 )
 
@@ -65,13 +66,21 @@ func newDaemonCmd() *cobra.Command {
 }
 
 func newStdioCmd() *cobra.Command {
-	return &cobra.Command{
+	var port int
+	cmd := &cobra.Command{
 		Use:   "stdio",
-		Short: "Run as a stdio bridge to the local daemon (spawn target for stdio-only clients)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errors.New("stdio: not yet implemented")
+		Short: "Run as a stdio bridge to the local daemon",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+			return bridge.Run(cmd.Context(), bridge.RunConfig{
+				URL:    url,
+				Stdin:  os.Stdin,
+				Stdout: os.Stdout,
+			})
 		},
 	}
+	cmd.Flags().IntVar(&port, "port", 7823, "daemon HTTP port")
+	return cmd
 }
 
 func newStatusCmd() *cobra.Command {
