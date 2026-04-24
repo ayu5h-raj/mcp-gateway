@@ -46,6 +46,7 @@ type model struct {
 	activeTab tab
 	connected bool
 	lastErr   error
+	showHelp  bool
 
 	status  admin.Status
 	servers []admin.ServerInfo
@@ -140,19 +141,33 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "?":
+		m.showHelp = !m.showHelp
+		return m, nil
 	case "esc":
+		if m.showHelp {
+			m.showHelp = false
+			return m, nil
+		}
 		if m.detail != nil {
 			m.detail = nil
 			return m, nil
 		}
 	case "1":
+		m.showHelp = false
 		m.activeTab = tabServers
 		return m, nil
 	case "2":
+		m.showHelp = false
 		m.activeTab = tabEvents
 		return m, nil
 	case "3":
+		m.showHelp = false
 		m.activeTab = tabTools
+		return m, nil
+	}
+	// Help overlay swallows all other keys while active.
+	if m.showHelp {
 		return m, nil
 	}
 	// Detail view takes precedence over tabs.
@@ -180,9 +195,17 @@ func (m model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.renderTabBar())
 	b.WriteString("\n")
-	if m.detail != nil {
+	if m.lastErr != nil && m.connected {
+		// Non-fatal error banner (keeps rendering the active tab below).
+		b.WriteString(errorStyle.Render("  ⚠ " + m.lastErr.Error()))
+		b.WriteString("\n")
+	}
+	switch {
+	case m.showHelp:
+		b.WriteString(m.renderHelp())
+	case m.detail != nil:
 		b.WriteString(m.detail.view(m))
-	} else {
+	default:
 		switch m.activeTab {
 		case tabServers:
 			b.WriteString(m.serversView.view(m))
@@ -195,6 +218,27 @@ func (m model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.renderFooter())
 	return b.String()
+}
+
+func (m model) renderHelp() string {
+	lines := []string{
+		"",
+		"  Keybindings",
+		"",
+		"  1 / 2 / 3     switch to Servers / Events / Tools tab",
+		"  j / k         move selection down / up",
+		"  enter         drill into server detail (Servers tab)",
+		"  r             restart highlighted server",
+		"  t             toggle enable/disable on highlighted server",
+		"  esc           back out of detail / close help",
+		"  ?             toggle this help",
+		"  q / ctrl+c    quit",
+		"",
+		"  The header shows daemon status; a red banner means the daemon is",
+		"  unreachable. The TUI auto-reconnects when the daemon comes back.",
+		"",
+	}
+	return headerStyle.Render(strings.Join(lines, "\n"))
 }
 
 func (m model) renderHeader() string {
@@ -221,16 +265,19 @@ func (m model) renderTabBar() string {
 
 func (m model) renderFooter() string {
 	var hints string
-	if m.detail != nil {
-		hints = "esc:back  r:restart  t:toggle"
-	} else {
+	switch {
+	case m.showHelp:
+		hints = "?:close  esc:close  q:quit"
+	case m.detail != nil:
+		hints = "esc:back  r:restart  t:toggle  ?:help  q:quit"
+	default:
 		switch m.activeTab {
 		case tabServers:
-			hints = "enter:detail  r:restart  t:toggle  1-3:tab  q:quit"
+			hints = "j/k:nav  enter:detail  r:restart  t:toggle  1-3:tab  ?:help  q:quit"
 		case tabEvents:
-			hints = "/:filter  1-3:tab  q:quit"
+			hints = "1-3:tab  ?:help  q:quit"
 		case tabTools:
-			hints = "/:filter  1-3:tab  q:quit"
+			hints = "j/k:nav  1-3:tab  ?:help  q:quit"
 		}
 	}
 	return helpStyle.Render(hints)
