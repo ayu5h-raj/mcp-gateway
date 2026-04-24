@@ -53,7 +53,10 @@ func newStartCmd() *cobra.Command {
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
 				if _, err := os.Stat(sock); err == nil {
-					fmt.Printf("daemon started (pid=%d, log=%s)\n", cmd.Process.Pid, logPath)
+					// Read pid from the daemon's pidfile (cmd.Process.Pid is
+					// stale after Release on some platforms).
+					pid, _ := readPid(pidPath)
+					fmt.Printf("daemon started (pid=%d, log=%s)\n", pid, logPath)
 					return nil
 				}
 				time.Sleep(100 * time.Millisecond)
