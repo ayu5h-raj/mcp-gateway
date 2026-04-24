@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ayushraj/mcp-gateway/internal/aggregator"
@@ -12,7 +13,8 @@ import (
 
 // NewMCPHandler returns an http.Handler that implements the POST /mcp half of
 // the Streamable HTTP transport. All JSON-RPC requests must be POSTs; the body
-// is a single JSON-RPC request; response is a single JSON-RPC response.
+// is a single JSON-RPC request; response is a single JSON-RPC response (or
+// HTTP 202 with no body if the request was a notification).
 // Server-initiated streams (SSE on GET /mcp) are out of scope for v0.
 func NewMCPHandler(agg *aggregator.Aggregator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -20,17 +22,39 @@ func NewMCPHandler(agg *aggregator.Aggregator) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		var req rpcReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
 			writeErr(w, nil, -32700, "parse error: "+err.Error())
+			return
+		}
+		// Notifications (no id, or method starting with "notifications/") MUST NOT
+		// receive a response per JSON-RPC 2.0. Acknowledge with 202 and no body.
+		if isNotification(req) {
+			w.WriteHeader(http.StatusAccepted)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		resp := dispatch(ctx, agg, req)
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	})
+}
+
+// isNotification reports whether the request is a JSON-RPC notification —
+// either the method is in the MCP "notifications/" namespace, or the request
+// has no id. Notifications must not receive a response.
+func isNotification(req rpcReq) bool {
+	if strings.HasPrefix(req.Method, "notifications/") {
+		return true
+	}
+	// Empty/absent id → notification. Note: explicit `null` id is technically
+	// a request per JSON-RPC, so distinguish it from absent.
+	if len(req.ID) == 0 {
+		return true
+	}
+	return false
 }
 
 type rpcReq struct {
@@ -66,7 +90,7 @@ func dispatch(ctx context.Context, agg *aggregator.Aggregator, req rpcReq) rpcRe
 			},
 			"serverInfo": map[string]any{"name": "mcp-gateway", "version": "0.1"},
 		})
-	case "notifications/initialized", "notifications/cancelled", "ping":
+	case "ping":
 		return ok(req.ID, map[string]any{})
 	case "tools/list":
 		tools := agg.Tools()

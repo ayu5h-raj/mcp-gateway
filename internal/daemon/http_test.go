@@ -116,3 +116,40 @@ func TestMCP_RejectsNonPost(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
+
+// Regression for the bug where notifications got a JSON-RPC response and
+// Claude Desktop's validator rejected the malformed frame. Per JSON-RPC 2.0,
+// notifications (no id, or method in the "notifications/" namespace) MUST NOT
+// receive a response. We acknowledge with HTTP 202 and an empty body.
+func TestMCP_NotificationGets202NoBody(t *testing.T) {
+	agg := setupAggregator(t)
+	h := NewMCPHandler(agg)
+	cases := []map[string]any{
+		// Canonical: method in notifications/ namespace, no id.
+		{"jsonrpc": "2.0", "method": "notifications/initialized"},
+		// notifications/cancelled — also a notification.
+		{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": "1"}},
+		// A request with no id is also a notification.
+		{"jsonrpc": "2.0", "method": "tools/list"},
+	}
+	for _, c := range cases {
+		buf, _ := json.Marshal(c)
+		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(buf))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusAccepted, rec.Code, "case=%v", c)
+		assert.Empty(t, rec.Body.Bytes(), "notification must produce no body; case=%v", c)
+	}
+}
+
+// Sanity: ping is a request (has an id) and gets a real response.
+func TestMCP_PingGetsResponse(t *testing.T) {
+	agg := setupAggregator(t)
+	h := NewMCPHandler(agg)
+	out := postJSON(t, h, map[string]any{
+		"jsonrpc": "2.0", "id": "p1", "method": "ping",
+	})
+	require.NotNil(t, out["result"])
+	assert.Nil(t, out["error"])
+}

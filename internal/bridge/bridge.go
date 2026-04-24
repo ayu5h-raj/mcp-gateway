@@ -57,6 +57,11 @@ func Run(ctx context.Context, cfg RunConfig) error {
 			return err
 		}
 		body = bytes.TrimRight(body, "\r\n")
+		// Notifications get HTTP 202 with no body. Don't emit a stdout frame —
+		// per JSON-RPC, the server (us) MUST NOT respond to notifications.
+		if len(body) == 0 {
+			continue
+		}
 		body = append(body, '\n')
 		if _, werr := cfg.Stdout.Write(body); werr != nil {
 			return werr
