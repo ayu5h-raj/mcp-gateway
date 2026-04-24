@@ -69,8 +69,9 @@ func (e eventsModel) view(m model) string {
 
 	show := e.events
 	// Simple viewport: show the last N rows where N fits under the terminal.
-	if m.h > 0 && len(show) > m.h-8 {
-		show = show[len(show)-(m.h-8):]
+	// Chrome matches Servers (7 rows).
+	if m.h > 0 && len(show) > m.h-7 {
+		show = show[len(show)-(m.h-7):]
 	}
 	for _, ev := range show {
 		if e.filter != "" && !matchesFilter(ev, e.filter) {

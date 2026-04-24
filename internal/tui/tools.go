@@ -77,28 +77,41 @@ func (t toolsModel) view(m model) string {
 	)))
 	b.WriteString("\n")
 
-	// Window around the selected row so the viewport follows navigation.
-	pageSize := m.h - 9 // summary + col header + borders + description + statusline
-	if pageSize < 1 {
-		pageSize = len(t.tools)
+	// First pass: decide whether a bottom description footer is needed so we
+	// can budget its height into pageSize. We need the footer only when the
+	// terminal is too narrow to fit inline descriptions on each row. Use the
+	// minimum possible nameW (20) to make a conservative descW guess.
+	minNameW := 20
+	guessDescW := m.w - 6 - (1 + tokenW + 2 + serverW + 2 + minNameW + 3)
+	wantFooter := guessDescW < 10
+
+	// Chrome: header(1) + panel top border(1) + summary(1) + col header(1) +
+	// panel bottom border(1) + gap(1) + statusline(1) = 7 rows.
+	// + 2 extra when the bottom description footer is present (blank + desc).
+	chrome := 7
+	if wantFooter {
+		chrome += 2
+	}
+	pageSize := m.h - chrome
+	if pageSize < 3 {
+		// Either m.h hasn't arrived yet (0) or terminal is tiny. Keep the
+		// viewport tight so windowing still works; content will clip at the
+		// bottom but scrolling stays correct.
+		pageSize = 3
 	}
 	start, end := windowAround(len(t.tools), t.selected, pageSize)
 
 	// Figure out the widest tool name in the visible window so names align
 	// into a tidy column without a hardcoded width cap.
-	nameW := 0
+	nameW := minNameW
 	for i := start; i < end; i++ {
 		if l := len(t.tools[i].Name); l > nameW {
 			nameW = l
 		}
 	}
-	if nameW < 20 {
-		nameW = 20
-	}
 
-	// Reserve the remaining terminal width for an inline description column.
-	// Panel chrome: 2 border + 2 padding + 2 for the bar+space prefix.
-	descW := m.w - 6 - (1 + tokenW + 2 + serverW + 2 + nameW + 3) // "  —  " = 5 chars approx
+	// Recompute descW with the actual nameW.
+	descW := m.w - 6 - (1 + tokenW + 2 + serverW + 2 + nameW + 3)
 	if descW < 10 {
 		descW = 0
 	}
@@ -121,7 +134,6 @@ func (t toolsModel) view(m model) string {
 		bar := unselectedBar
 		if i == t.selected {
 			bar = selectedBar
-			// Apply selectedRow only to the columns; keep the description muted.
 			if descW > 0 && tl.Description != "" {
 				descTxt := truncate(strings.ReplaceAll(tl.Description, "\n", " "), descW)
 				line = selectedRow.Render(base) + "  " + mutedText.Render("— "+descTxt)
@@ -133,10 +145,16 @@ func (t toolsModel) view(m model) string {
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	if t.selected < len(t.tools) {
+	// Bottom description footer only when inline descriptions aren't showing.
+	// Truncate to terminal width so it never wraps and breaks the height budget.
+	if wantFooter && t.selected < len(t.tools) {
 		cur := t.tools[t.selected]
+		maxDesc := m.w - 18 // "description: " + panel chrome
+		if maxDesc < 20 {
+			maxDesc = 20
+		}
 		b.WriteString("\n ")
-		b.WriteString(mutedText.Render("description: " + truncate(cur.Description, 120)))
+		b.WriteString(mutedText.Render("description: " + truncate(strings.ReplaceAll(cur.Description, "\n", " "), maxDesc)))
 	}
 	return b.String()
 }

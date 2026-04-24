@@ -98,9 +98,12 @@ func (s serversModel) view(m model) string {
 
 	now := time.Now()
 	// Window around the selected row so the viewport scrolls with navigation.
-	pageSize := m.h - 6 // col header + borders + header strip + statusline
-	if pageSize < 1 {
-		pageSize = len(s.servers)
+	// Chrome: header(1) + panel top(1) + col header(1) + panel bot(1) + gap(1) + statusline(1) = 6 rows.
+	// But lipgloss rendering sometimes squeezes an extra row; keep a 3-row
+	// minimum so windowing still works before the first WindowSizeMsg arrives.
+	pageSize := m.h - 7
+	if pageSize < 3 {
+		pageSize = 3
 	}
 	start, end := windowAround(len(s.servers), s.selected, pageSize)
 	for i := start; i < end; i++ {
