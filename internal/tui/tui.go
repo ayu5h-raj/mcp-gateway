@@ -188,35 +188,40 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders: header, tab bar, active tab (or detail if present), help footer.
+// View renders: header, optional error banner, bordered content panel, statusline footer.
 func (m model) View() string {
 	var b strings.Builder
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n")
-	b.WriteString(m.renderTabBar())
-	b.WriteString("\n")
 	if m.lastErr != nil && m.connected {
-		// Non-fatal error banner (keeps rendering the active tab below).
-		b.WriteString(errorStyle.Render("  ⚠ " + m.lastErr.Error()))
+		b.WriteString(errorBanner.Render("⚠ " + m.lastErr.Error()))
 		b.WriteString("\n")
 	}
+
+	var body string
 	switch {
 	case m.showHelp:
-		b.WriteString(m.renderHelp())
+		body = m.renderHelp()
 	case m.detail != nil:
-		b.WriteString(m.detail.view(m))
+		body = m.detail.view(m)
 	default:
 		switch m.activeTab {
 		case tabServers:
-			b.WriteString(m.serversView.view(m))
+			body = m.serversView.view(m)
 		case tabEvents:
-			b.WriteString(m.eventsView.view(m))
+			body = m.eventsView.view(m)
 		case tabTools:
-			b.WriteString(m.toolsView.view(m))
+			body = m.toolsView.view(m)
 		}
 	}
+	// Wrap body in a rounded panel sized to the terminal.
+	panel := panelStyle
+	if m.w > 4 {
+		panel = panel.Width(m.w - 2)
+	}
+	b.WriteString(panel.Render(body))
 	b.WriteString("\n")
-	b.WriteString(m.renderFooter())
+	b.WriteString(m.renderStatusLine())
 	return b.String()
 }
 
@@ -241,44 +246,74 @@ func (m model) renderHelp() string {
 	return headerStyle.Render(strings.Join(lines, "\n"))
 }
 
+// renderHeader builds the top strip: brand │ pid │ addr │ servers/tools │ conn status.
 func (m model) renderHeader() string {
-	left := headerStyle.Render("mcp-gateway")
-	info := fmt.Sprintf("servers: %d  tools: %d", m.status.NumServers, m.status.NumTools)
 	if !m.connected {
-		info = errorStyle.Render("daemon disconnected")
+		return lipgloss.JoinHorizontal(lipgloss.Top,
+			" ", headerBrand, headerSep, headerDisconnect,
+		)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", info)
+	pid := "—"
+	if m.status.PID != 0 {
+		pid = fmt.Sprintf("pid %d", m.status.PID)
+	}
+	addr := "—"
+	if m.status.HTTPPort != 0 {
+		addr = fmt.Sprintf("127.0.0.1:%d", m.status.HTTPPort)
+	}
+	totals := fmt.Sprintf("servers %d  tools %d", m.status.NumServers, m.status.NumTools)
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		" ", headerBrand,
+		headerSep, headerInfo.Render(pid),
+		headerSep, headerInfo.Render(addr),
+		headerSep, headerInfo.Render(totals),
+		headerSep, headerConnected,
+	)
 }
 
-func (m model) renderTabBar() string {
-	var parts []string
+// renderStatusLine builds a vim-style status line: colored tab chips on the
+// left, contextual hints on the right, filling the terminal width.
+func (m model) renderStatusLine() string {
+	// Left — tab chips.
+	var left []string
 	for i := tab(0); i < numTabs; i++ {
-		label := fmt.Sprintf("[%d]%s", i+1, i)
-		if i == m.activeTab {
-			parts = append(parts, tabActive.Render(label))
+		label := fmt.Sprintf(" %d %s ", i+1, i)
+		if i == m.activeTab && !m.showHelp && m.detail == nil {
+			left = append(left, statusTabActive.Render(label))
 		} else {
-			parts = append(parts, tabInactive.Render(label))
+			left = append(left, statusTabInactive.Render(label))
 		}
 	}
-	return strings.Join(parts, " ")
-}
+	leftBlock := lipgloss.JoinHorizontal(lipgloss.Top, left...)
 
-func (m model) renderFooter() string {
-	var hints string
+	// Right — contextual hints.
+	var hintText string
 	switch {
 	case m.showHelp:
-		hints = "?:close  esc:close  q:quit"
+		hintText = "?:close  esc:close  q:quit"
 	case m.detail != nil:
-		hints = "esc:back  r:restart  t:toggle  ?:help  q:quit"
+		hintText = "esc:back  r:restart  t:toggle  ?:help  q:quit"
 	default:
 		switch m.activeTab {
 		case tabServers:
-			hints = "j/k:nav  enter:detail  r:restart  t:toggle  1-3:tab  ?:help  q:quit"
+			hintText = "j/k:nav  enter:detail  r:restart  t:toggle  ?:help  q:quit"
 		case tabEvents:
-			hints = "1-3:tab  ?:help  q:quit"
+			hintText = "1-3:tab  ?:help  q:quit"
 		case tabTools:
-			hints = "j/k:nav  1-3:tab  ?:help  q:quit"
+			hintText = "j/k:nav  1-3:tab  ?:help  q:quit"
 		}
 	}
-	return helpStyle.Render(hints)
+	right := statusHints.Render(hintText)
+
+	// Fill the middle to push right-block to the right edge.
+	w := m.w
+	if w < 1 {
+		w = 80
+	}
+	gap := w - lipgloss.Width(leftBlock) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	middle := lipgloss.NewStyle().Background(colStatusBg).Render(strings.Repeat(" ", gap))
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftBlock, middle, right)
 }

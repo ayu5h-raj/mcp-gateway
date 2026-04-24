@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ayu5h-raj/mcp-gateway/internal/admin"
 )
@@ -68,25 +67,61 @@ func (s serversModel) handleKey(m model, k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (s serversModel) view(_ model) string {
 	if len(s.servers) == 0 {
-		return disabledStyle.Render("\n  (no servers configured — try `mcp-gateway add`)\n")
+		return "\n" + disabledText.Render("(no servers configured — try `mcp-gateway add`)") + "\n"
 	}
+
+	// Column widths. Fixed budget for the rigid columns; NAME + PREFIX get
+	// enough to read real server names; LAST fills the rest visually.
+	const (
+		nameW  = 18
+		stateW = 12 // "restarting" is the longest state name
+		prefW  = 14
+		toolsW = 6
+		tokenW = 9
+		lastW  = 16
+	)
+
 	var b strings.Builder
-	header := fmt.Sprintf("  %-14s %-10s %-12s %6s %8s %s",
-		"NAME", "STATE", "PREFIX", "TOOLS", "~TOKENS", "LAST ACTIVITY")
-	b.WriteString(headerStyle.Render(header))
+
+	// Column header row — bold, dim grey, with a blank spacer column for the bar.
+	b.WriteString(" ") // space for the bar column
+	b.WriteString(colHeader.Render(fmt.Sprintf(
+		" %-*s %-*s %-*s %*s %*s  %-*s",
+		nameW, "NAME",
+		stateW, "STATE",
+		prefW, "PREFIX",
+		toolsW, "TOOLS",
+		tokenW, "~TOKENS",
+		lastW, "LAST ACTIVITY",
+	)))
 	b.WriteString("\n")
+
 	now := time.Now()
 	for i, srv := range s.servers {
 		age := "—"
 		if !srv.StartedAt.IsZero() {
 			age = shortDuration(now.Sub(srv.StartedAt)) + " ago"
 		}
-		row := fmt.Sprintf("  %-14s %s %-8s %-12s %6d %8d %s",
-			truncate(srv.Name, 14), glyph(srv.State), padRight(srv.State, 8),
-			truncate(srv.Prefix, 12), srv.ToolCount, srv.EstTokens, age)
+		// Glyph is pre-colored; stateText colors the state word.
+		statusCol := glyph(srv.State) + " " + stateText(padRight(srv.State, stateW-2))
+
+		rowPlain := fmt.Sprintf(
+			" %-*s %s %-*s %*d %*d  %-*s",
+			nameW, truncate(srv.Name, nameW),
+			statusCol, // already styled + padded
+			prefW, truncate(srv.Prefix, prefW),
+			toolsW, srv.ToolCount,
+			tokenW, srv.EstTokens,
+			lastW, truncate(age, lastW),
+		)
+
+		bar := unselectedBar
+		row := rowPlain
 		if i == s.selected {
-			row = lipgloss.NewStyle().Reverse(true).Render(row)
+			bar = selectedBar
+			row = selectedRow.Render(rowPlain)
 		}
+		b.WriteString(bar)
 		b.WriteString(row)
 		b.WriteString("\n")
 	}

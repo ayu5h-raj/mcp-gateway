@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ayu5h-raj/mcp-gateway/internal/admin"
 )
@@ -51,34 +50,57 @@ func (t toolsModel) handleKey(m model, k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (t toolsModel) view(m model) string {
 	if len(t.tools) == 0 {
-		return disabledStyle.Render("\n  (no tools — no servers running?)\n")
+		return "\n" + disabledText.Render("(no tools — no servers running?)") + "\n"
 	}
 	var b strings.Builder
+
 	total := 0
 	for _, tl := range t.tools {
 		total += tl.EstTokens
 	}
-	b.WriteString(headerStyle.Render(fmt.Sprintf("  %d tools — total ~%d tokens", len(t.tools), total)))
+	summary := fmt.Sprintf("%d tools  ·  total ~%d tokens",
+		len(t.tools), total)
+	b.WriteString(" ")
+	b.WriteString(accentText.Render(summary))
 	b.WriteString("\n")
-	b.WriteString(headerStyle.Render(fmt.Sprintf("  %8s  %-14s  %s", "~TOKENS", "SERVER", "TOOL")))
+
+	const (
+		tokenW  = 9
+		serverW = 14
+	)
+	b.WriteString(" ")
+	b.WriteString(colHeader.Render(fmt.Sprintf(
+		" %*s  %-*s  %s",
+		tokenW, "~TOKENS",
+		serverW, "SERVER",
+		"TOOL",
+	)))
 	b.WriteString("\n")
+
 	show := t.tools
-	// Reserve ~7 rows for header+footer+preview; show the top N when over budget.
-	if m.h > 0 && len(show) > m.h-7 {
-		show = show[:m.h-7]
+	// Reserve ~8 rows for header+summary+preview.
+	if m.h > 0 && len(show) > m.h-9 {
+		show = show[:m.h-9]
 	}
 	for i, tl := range show {
-		line := fmt.Sprintf("  %8d  %-14s  %s", tl.EstTokens, truncate(tl.Server, 14), tl.Name)
+		line := fmt.Sprintf(" %*d  %-*s  %s",
+			tokenW, tl.EstTokens,
+			serverW, truncate(tl.Server, serverW),
+			tl.Name,
+		)
+		bar := unselectedBar
 		if i == t.selected {
-			line = lipgloss.NewStyle().Reverse(true).Render(line)
+			bar = selectedBar
+			line = selectedRow.Render(line)
 		}
+		b.WriteString(bar)
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
 	if t.selected < len(t.tools) {
 		cur := t.tools[t.selected]
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render(fmt.Sprintf("  description: %s", truncate(cur.Description, 120))))
+		b.WriteString("\n ")
+		b.WriteString(mutedText.Render("description: " + truncate(cur.Description, 120)))
 	}
 	return b.String()
 }

@@ -47,32 +47,70 @@ func (e eventsModel) Update(msg tea.Msg) (eventsModel, tea.Cmd) {
 
 func (e eventsModel) view(m model) string {
 	if len(e.events) == 0 {
-		return disabledStyle.Render("\n  (no events yet — waiting on daemon activity)\n")
+		return "\n" + disabledText.Render("(no events yet — waiting on daemon activity)") + "\n"
 	}
+	const (
+		timeW   = 8
+		kindW   = 22
+		serverW = 12
+		methodW = 24
+	)
 	var b strings.Builder
-	b.WriteString(headerStyle.Render(fmt.Sprintf("  %-8s %-26s %-14s %-30s %s",
-		"TIME", "KIND", "SERVER", "METHOD", "DETAIL")))
+	b.WriteString(" ")
+	b.WriteString(colHeader.Render(fmt.Sprintf(
+		" %-*s %-*s %-*s %-*s  %s",
+		timeW, "TIME",
+		kindW, "KIND",
+		serverW, "SERVER",
+		methodW, "METHOD",
+		"DETAIL",
+	)))
 	b.WriteString("\n")
+
 	show := e.events
-	// Show the last ~half-screen-worth (simple viewport for v0.3).
-	if m.h > 0 && len(show) > m.h-6 {
-		show = show[len(show)-(m.h-6):]
+	// Simple viewport: show the last N rows where N fits under the terminal.
+	if m.h > 0 && len(show) > m.h-8 {
+		show = show[len(show)-(m.h-8):]
 	}
 	for _, ev := range show {
 		if e.filter != "" && !matchesFilter(ev, e.filter) {
 			continue
 		}
 		detail := ""
-		if ev.Error != "" {
-			detail = errorStyle.Render(ev.Error)
-		} else if ev.Duration > 0 {
-			detail = fmt.Sprintf("%v", ev.Duration.Round(time.Millisecond))
+		switch {
+		case ev.Error != "":
+			detail = errorText.Render(ev.Error)
+		case ev.Duration > 0:
+			detail = mutedText.Render(ev.Duration.Round(time.Millisecond).String())
 		}
-		fmt.Fprintf(&b, "  %-8s %-26s %-14s %-30s %s\n",
-			ev.Time.Format("15:04:05"), truncate(ev.Kind, 26),
-			truncate(ev.Server, 14), truncate(ev.Method, 30), detail)
+		fmt.Fprintf(&b, "  %-*s %-*s %-*s %-*s  %s\n",
+			timeW, mutedText.Render(ev.Time.Format("15:04:05")),
+			kindW, kindStyle(ev.Kind, kindW),
+			serverW, truncate(ev.Server, serverW),
+			methodW, truncate(ev.Method, methodW),
+			detail,
+		)
 	}
 	return b.String()
+}
+
+// kindStyle colors well-known event kinds. Returns a padded, styled string.
+func kindStyle(kind string, width int) string {
+	padded := padRight(truncate(kind, width), width)
+	switch {
+	case kind == "mcp.request" || kind == "mcp.response":
+		return accentText.Render(padded)
+	case kind == "child.attached":
+		return stateStyle["running"].Render(padded)
+	case kind == "child.crashed" || kind == "child.disabled":
+		return errorText.Render(padded)
+	case kind == "child.restarted":
+		return stateStyle["restarting"].Render(padded)
+	case kind == "config.reload":
+		return mutedText.Render(padded)
+	default:
+		return padded
+	}
 }
 
 func matchesFilter(ev event.Event, f string) bool {
