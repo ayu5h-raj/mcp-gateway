@@ -130,6 +130,39 @@ Point them directly at the daemon's Streamable HTTP endpoint:
 
 ---
 
+## Day-to-day commands
+
+```bash
+mcp-gateway start                       # spawn the daemon (detached)
+mcp-gateway status                      # status from /admin/status
+mcp-gateway list                        # all servers + state + token cost
+
+# Add a server (prefix defaults to name). Two patterns for credentials:
+
+# 1) Hardcoded — fastest, fine for a local-only config:
+mcp-gateway add github \
+  --command npx --arg -y --arg @modelcontextprotocol/server-github \
+  --env GITHUB_TOKEN=ghp_xxx
+
+# 2) Pull from your shell env at spawn time:
+mcp-gateway add github \
+  --command npx --arg -y --arg @modelcontextprotocol/server-github \
+  --env GITHUB_TOKEN='${env:GITHUB_TOKEN}'
+
+mcp-gateway disable github              # stop the child but keep config
+mcp-gateway enable github               # start it again
+mcp-gateway rm github                   # remove from config
+
+mcp-gateway secret list                 # which env vars does the config want? are they set?
+
+mcp-gateway stop                        # SIGTERM via pidfile
+mcp-gateway restart                     # stop + start
+```
+
+You can still hand-edit `~/.mcp-gateway/config.jsonc`; the daemon hot-reloads. The CLI just removes the need.
+
+---
+
 ## Verify
 
 A small smoke client ships in this repo. It drives the gateway through the full MCP lifecycle (`initialize` → `notifications/initialized` → `tools/list` → `ping` → optional `tools/call`) and reports PASS/FAIL per step:
