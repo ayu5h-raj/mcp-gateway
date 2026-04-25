@@ -1,0 +1,12 @@
+{
+  "globalShortcut": "Cmd+Shift+Space",
+  "mcpServers": {
+    "kite": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://mcp.kite.trade/sse"]
+    }
+  },
+  "experimental": {
+    "telemetryOptIn": false
+  }
+}
