@@ -38,21 +38,20 @@ func confirmFromReader(in io.Reader, out io.Writer, prompt string, defaultYes, a
 	}
 	br := bufio.NewReader(in)
 	for attempt := 0; attempt < 3; attempt++ {
-		fmt.Fprintf(out, "%s %s ", prompt, suffix)
+		_, _ = fmt.Fprintf(out, "%s %s ", prompt, suffix)
 		line, err := br.ReadString('\n')
 		if err != nil && line == "" {
 			return defaultYes
 		}
-		line = strings.TrimSpace(strings.ToLower(line))
-		switch {
-		case line == "":
+		switch strings.TrimSpace(strings.ToLower(line)) {
+		case "":
 			return defaultYes
-		case line == "y" || line == "yes":
+		case "y", "yes":
 			return true
-		case line == "n" || line == "no":
+		case "n", "no":
 			return false
 		default:
-			fmt.Fprintln(out, "please answer y or n")
+			_, _ = fmt.Fprintln(out, "please answer y or n")
 		}
 	}
 	return defaultYes
