@@ -120,6 +120,19 @@ type importedFromClient struct {
 	servers []string // names imported (for the patch step)
 }
 
+// stdioServers returns only those entries whose Command is set. HTTP/SSE
+// transport entries (which have no Command, only a url + headers) are
+// filtered out — mcp-gateway v1 only proxies stdio downstream servers.
+func stdioServers(in []clientcfg.Server) []clientcfg.Server {
+	out := make([]clientcfg.Server, 0, len(in))
+	for _, s := range in {
+		if s.Command != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromClient, error) {
 	// Ensure the config directory exists. 0o700 — the file inside is 0o600
 	// (server env may carry secrets); the parent dir is consistent with that.
@@ -153,6 +166,16 @@ func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromCl
 					continue
 				}
 				for _, s := range d.Servers {
+					if s.Command == "" {
+						// Almost certainly an HTTP/SSE-transport entry
+						// (type: http with url + headers). mcp-gateway v1
+						// only proxies stdio downstream servers; surface
+						// the entry as unsupported so the user knows
+						// nothing is silently dropped, and leave it in
+						// the client's own config.
+						fmt.Printf("      %-15s — (HTTP transport — not yet supported by mcp-gateway, leave in %s)\n", s.Name, d.Client.Name)
+						continue
+					}
 					argsStr := ""
 					if len(s.Args) > 0 {
 						argsStr = " " + strings.Join(s.Args, " ")
@@ -165,12 +188,16 @@ func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromCl
 				if d.Err != nil || len(d.Servers) == 0 {
 					continue
 				}
-				prompt := fmt.Sprintf("Import %d server(s) from %s?", len(d.Servers), d.Client.Name)
+				supported := stdioServers(d.Servers)
+				if len(supported) == 0 {
+					continue
+				}
+				prompt := fmt.Sprintf("Import %d server(s) from %s?", len(supported), d.Client.Name)
 				if !confirm(prompt, true, assumeYes) {
 					continue
 				}
-				names := make([]string, 0, len(d.Servers))
-				for _, s := range d.Servers {
+				names := make([]string, 0, len(supported))
+				for _, s := range supported {
 					if _, exists := cfg.MCPServers[s.Name]; exists {
 						fmt.Printf("  ⚠ skipping %s (already in config)\n", s.Name)
 						continue
