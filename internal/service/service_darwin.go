@@ -21,7 +21,16 @@ func Install(gatewayBinary string) error {
 	if err != nil {
 		return err
 	}
-	logFile := filepath.Join(home, ".mcp-gateway", "daemon.log")
+	// Pre-create the log file's parent so launchd's StandardOutPath/
+	// StandardErrorPath open succeeds. launchd does not create parent
+	// dirs for these keys; without this, a `service install` run before
+	// `mcp-gateway init` would respawn forever (KeepAlive=true) with no
+	// log output anywhere.
+	logDir := filepath.Join(home, ".mcp-gateway")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", logDir, err)
+	}
+	logFile := filepath.Join(logDir, "daemon.log")
 
 	body, err := render(renderArgs{
 		GatewayBinary: gatewayBinary,

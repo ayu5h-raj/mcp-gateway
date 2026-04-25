@@ -1,5 +1,9 @@
 package service
 
+// Install and Uninstall require a live launchctl session and cannot be unit-
+// tested without a real macOS launchd; they are exercised by the manual smoke
+// runbook (docs/release-runbook.md) and the Phase 8 e2e dry-run.
+
 import (
 	"os"
 	"path/filepath"
