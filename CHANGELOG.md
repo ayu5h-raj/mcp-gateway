@@ -6,6 +6,14 @@ All notable changes to mcp-gateway are documented here. Versions follow [SemVer]
 
 (Nothing here yet.)
 
+## [1.0.5] — 2026-04-25
+
+### Fixed
+- `mcp-gateway service install` and `mcp-gateway init` no longer record the brew Cellar path (e.g. `/opt/homebrew/Cellar/mcp-gateway/1.0.4/bin/mcp-gateway`) into the launchd plist or patched client configs. The Cellar path is removed by `brew upgrade`, so previously, every brew bump silently broke auto-start and the stdio bridge until you re-ran `init`. v1.0.5 records the stable symlink (`/opt/homebrew/bin/mcp-gateway`) instead. **Brew upgraders: re-run `mcp-gateway service uninstall && mcp-gateway service install` once after upgrading to pick up the fix on the existing plist; client configs auto-heal next time you run `mcp-gateway init -y --force`.**
+
+### Changed
+- The TUI now flips a server's row state to `stopping`/`starting`/`restarting` immediately when you press `t` (toggle) or `r` (restart), instead of waiting up to ~2s for the next admin poll to reflect the change. The real daemon-side state overwrites within one poll cycle. New `◒` glyph for the optimistic `stopping` state.
+
 ## [1.0.4] — 2026-04-25
 
 ### Fixed
