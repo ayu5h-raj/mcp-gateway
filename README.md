@@ -37,21 +37,46 @@ Roadmap features that double down on this positioning:
 
 ## Install
 
-### From source (works today)
+**Homebrew (recommended on macOS):**
 
-```bash
-git clone https://github.com/ayu5h-raj/mcp-gateway
-cd mcp-gateway
-make build
-./bin/mcp-gateway --help
+```sh
+brew install ayu5h-raj/tap/mcp-gateway
 ```
 
-### Pre-built (coming in v1.0 — Plan 04)
+**One-liner installer (Linux + macOS):**
 
-```bash
-brew install ayu5h-raj/mcp-gateway/mcp-gateway
-# or
-curl -fsSL https://raw.githubusercontent.com/ayu5h-raj/mcp-gateway/main/install.sh | sh
+```sh
+curl -fsSL https://raw.githubusercontent.com/ayu5h-raj/mcp-gateway/main/scripts/install.sh | sh
+```
+
+**From source:**
+
+```sh
+git clone https://github.com/ayu5h-raj/mcp-gateway && cd mcp-gateway && make build
+```
+
+## Quick Start
+
+```sh
+mcp-gateway init
+```
+
+`init` detects existing MCP client configs (Claude Desktop, Cursor), offers to migrate their servers into one mcp-gateway config, optionally patches each client to point at the gateway, and optionally installs a launchd auto-start service. Restart your MCP client and you're done.
+
+For non-interactive (e.g. dotfile bootstrap):
+
+```sh
+mcp-gateway init -y
+```
+
+## Daily use
+
+```sh
+mcp-gateway tui              # live ops dashboard
+mcp-gateway list             # show servers and their states
+mcp-gateway add <name> --command npx --arg -y --arg @scope/server
+mcp-gateway disable <name>   # stop a server without removing it
+mcp-gateway service status   # is the launchd service running?
 ```
 
 ---
@@ -87,79 +112,6 @@ Create `~/.mcp-gateway/config.jsonc`:
 ```
 
 The file is **hot-reloaded** via `fsnotify` — edit + save and the daemon reconciles without a restart.
-
----
-
-## Run
-
-```bash
-mcp-gateway daemon
-# INFO mcp-gateway listening addr=127.0.0.1:7823
-# INFO attached server=github prefix=github
-# INFO attached server=filesystem prefix=filesystem
-```
-
-Tools end up exposed as `<server>__<tool>` — e.g. `github__create_issue`, `filesystem__read_file`.
-
----
-
-## Connect a client
-
-### Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
-
-```json
-{
-  "mcpServers": {
-    "gateway": {
-      "command": "/usr/local/bin/mcp-gateway",
-      "args": ["stdio", "--port", "7823"]
-    }
-  }
-}
-```
-
-`mcp-gateway stdio` is a thin bridge: stdio in → HTTP POST to the daemon → response back on stdout. One bridge process per Claude session, but only one daemon.
-
-### Cursor / Claude Code / VS Code / Zed (HTTP-capable)
-
-Point them directly at the daemon's Streamable HTTP endpoint:
-
-```json
-{ "mcpServers": { "gateway": { "url": "http://127.0.0.1:7823/mcp" } } }
-```
-
----
-
-## Day-to-day commands
-
-```bash
-mcp-gateway start                       # spawn the daemon (detached)
-mcp-gateway status                      # status from /admin/status
-mcp-gateway list                        # all servers + state + token cost
-
-# Add a server (prefix defaults to name). Two patterns for credentials:
-
-# 1) Hardcoded — fastest, fine for a local-only config:
-mcp-gateway add github \
-  --command npx --arg -y --arg @modelcontextprotocol/server-github \
-  --env GITHUB_TOKEN=ghp_xxx
-
-# 2) Pull from your shell env at spawn time:
-mcp-gateway add github \
-  --command npx --arg -y --arg @modelcontextprotocol/server-github \
-  --env GITHUB_TOKEN='${env:GITHUB_TOKEN}'
-
-mcp-gateway disable github              # stop the child but keep config
-mcp-gateway enable github               # start it again
-mcp-gateway rm github                   # remove from config
-
-mcp-gateway secret list                 # which env vars does the config want? are they set?
-
-mcp-gateway stop                        # SIGTERM via pidfile
-mcp-gateway restart                     # stop + start
-```
-
-You can still hand-edit `~/.mcp-gateway/config.jsonc`; the daemon hot-reloads. The CLI just removes the need.
 
 ---
 
