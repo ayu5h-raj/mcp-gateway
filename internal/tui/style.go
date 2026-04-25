@@ -5,7 +5,6 @@ import "github.com/charmbracelet/lipgloss"
 // Palette — tuned for dark terminals (which is ~all of them).
 var (
 	colAccent    = lipgloss.Color("39")  // cyan — primary accent
-	colAccentDim = lipgloss.Color("24")  // darker cyan — selected row bg (unused in v1 polish)
 	colBorder    = lipgloss.Color("238") // dim grey — panel borders
 	colFg        = lipgloss.Color("252") // near-white
 	colFgMuted   = lipgloss.Color("244")
@@ -145,8 +144,7 @@ func windowAround(n, selected, pageSize int) (int, int) {
 // --- backward-compat aliases for pre-polish callers (detail.go, tests).
 // Kept narrow so new code uses the named styles above.
 var (
-	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
-	helpStyle     = mutedText
-	errorStyle    = errorText
-	disabledStyle = disabledText
+	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	helpStyle   = mutedText
+	errorStyle  = errorText
 )

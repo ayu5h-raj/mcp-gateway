@@ -98,16 +98,16 @@ func (e eventsModel) view(m model) string {
 // kindStyle colors well-known event kinds. Returns a padded, styled string.
 func kindStyle(kind string, width int) string {
 	padded := padRight(truncate(kind, width), width)
-	switch {
-	case kind == "mcp.request" || kind == "mcp.response":
+	switch kind {
+	case "mcp.request", "mcp.response":
 		return accentText.Render(padded)
-	case kind == "child.attached":
+	case "child.attached":
 		return stateStyle["running"].Render(padded)
-	case kind == "child.crashed" || kind == "child.disabled":
+	case "child.crashed", "child.disabled":
 		return errorText.Render(padded)
-	case kind == "child.restarted":
+	case "child.restarted":
 		return stateStyle["restarting"].Render(padded)
-	case kind == "config.reload":
+	case "config.reload":
 		return mutedText.Render(padded)
 	default:
 		return padded
