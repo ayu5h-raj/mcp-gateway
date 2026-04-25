@@ -52,6 +52,12 @@ func patchClaudeDesktop(path string, removedServers []string, gatewayBinary stri
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
+	// Resolve symlinks so we rewrite the actual backing file, not replace the
+	// symlink with a regular file. Dotfile managers (chezmoi, stow, mackup)
+	// commonly symlink Claude Desktop's config to a version-controlled location.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
 	// Parse into a generic map so we preserve unknown top-level keys verbatim.
 	var top map[string]any
 	if err := json.Unmarshal(body, &top); err != nil {

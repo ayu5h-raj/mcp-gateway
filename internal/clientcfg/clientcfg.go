@@ -29,7 +29,7 @@ type Server struct {
 type Detected struct {
 	Client  Client
 	Servers []Server
-	Err     error // non-nil if the file existed but failed to parse
+	Err     error // non-nil if the file existed but could not be read or parsed
 }
 
 // ErrConfigMissing means the client's config file does not exist on disk.

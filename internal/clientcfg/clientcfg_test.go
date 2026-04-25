@@ -3,6 +3,7 @@ package clientcfg
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -66,26 +67,9 @@ func TestReadClaudeDesktop_Missing(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
-	if !isMissing(err) {
+	if !errors.Is(err, ErrConfigMissing) {
 		t.Fatalf("want ErrConfigMissing, got %v", err)
 	}
-}
-
-func isMissing(err error) bool {
-	for ; err != nil; err = unwrap(err) {
-		if err == ErrConfigMissing {
-			return true
-		}
-	}
-	return false
-}
-
-func unwrap(err error) error {
-	type unwrapper interface{ Unwrap() error }
-	if u, ok := err.(unwrapper); ok {
-		return u.Unwrap()
-	}
-	return nil
 }
 
 func TestReadCursor_Basic(t *testing.T) {
@@ -102,16 +86,10 @@ func TestReadCursor_Basic(t *testing.T) {
 }
 
 func TestDetect_SkipsMissing(t *testing.T) {
-	// Detect uses os.UserHomeDir() + KnownClients(); we can't easily inject
-	// a fake home without refactoring. Instead, verify that on a system where
-	// neither config exists (CI), Detect returns no Detected entries.
 	t.Setenv("HOME", t.TempDir())
 	got := Detect()
-	for _, d := range got {
-		// On a tempdir HOME, no client configs should be found.
-		if d.Err == nil {
-			t.Fatalf("unexpected detection on empty home: %#v", d)
-		}
+	if len(got) != 0 {
+		t.Fatalf("Detect on empty HOME: want 0 results, got %d: %#v", len(got), got)
 	}
 }
 
@@ -194,5 +172,83 @@ func TestPatch_BackupCreated(t *testing.T) {
 	}
 	if !bytes.Equal(bak, body) {
 		t.Fatal("backup content does not match original")
+	}
+}
+
+func TestPatch_FollowsSymlink(t *testing.T) {
+	// Skip on Windows where symlinks need elevated perms.
+	src := loadFixture(t, "claude_desktop_basic.json")
+	body, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	realPath := filepath.Join(dir, "real-config.json")
+	if err := os.WriteFile(realPath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	linkPath := filepath.Join(dir, "config.json")
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this filesystem: %v", err)
+	}
+
+	c := Client{ID: "claude-desktop", ConfigPath: linkPath}
+	if err := Patch(c, []string{"kite"}, "/usr/bin/mcp-gateway"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The symlink should still BE a symlink (not replaced by a regular file).
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink was replaced by a regular file at %s", linkPath)
+	}
+
+	// The patched content must be readable through the symlink AND must be
+	// present in the real backing file.
+	realBody, err := os.ReadFile(realPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(realBody, []byte("mcp-gateway")) {
+		t.Fatalf("real file was not patched; symlink replaced instead.\nreal contents:\n%s", realBody)
+	}
+
+	// The backup should be next to the real file, not next to the symlink.
+	bakNextToReal, _ := filepath.Glob(realPath + ".bak.*")
+	bakNextToLink, _ := filepath.Glob(linkPath + ".bak.*")
+	if len(bakNextToReal) != 1 {
+		t.Fatalf("expected 1 backup next to real file, got %d", len(bakNextToReal))
+	}
+	if len(bakNextToLink) != 0 {
+		t.Fatalf("expected 0 backups next to symlink, got %d (backup placed wrong)", len(bakNextToLink))
+	}
+}
+
+func TestPatch_CursorDispatch(t *testing.T) {
+	src := loadFixture(t, "cursor_basic.json")
+	body, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mcp.json")
+	if err := os.WriteFile(p, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := Client{ID: "cursor", ConfigPath: p}
+	if err := Patch(c, []string{"github"}, "/usr/bin/mcp-gateway"); err != nil {
+		t.Fatalf("Patch(cursor): %v", err)
+	}
+	out, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out, []byte("mcp-gateway")) {
+		t.Fatalf("patched cursor config missing mcp-gateway entry:\n%s", out)
 	}
 }
