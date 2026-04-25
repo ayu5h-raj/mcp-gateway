@@ -6,7 +6,7 @@ All notable changes to mcp-gateway are documented here. Versions follow [SemVer]
 
 (Nothing here yet.)
 
-## [1.0.0] — 2026-04-XX
+## [1.0.0] — 2026-04-25
 
 ### Added
 - `mcp-gateway init` — first-run wizard. Detects Claude Desktop and Cursor configs, migrates servers, patches the client to point at the gateway, optionally installs a launchd auto-start service.
