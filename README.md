@@ -13,7 +13,7 @@
                                         ...
 ```
 
-**Status:** v0.3.0-alpha — adds a k9s-style TUI (`mcp-gateway tui`) on top of the v0.2 substrate. Live observability + control from the terminal.
+**Status:** v1.0.0 — `brew install ayu5h-raj/tap/mcp-gateway && mcp-gateway init` brings up a fully migrated, auto-starting daemon in one terminal session.
 
 ---
 
@@ -31,7 +31,7 @@ Several aggregators exist (MetaMCP, 1MCP, mcp-hub, mcp-proxy). This one is posit
 Roadmap features that double down on this positioning:
 - TUI manager (Bubble Tea) — k9s-style live ops view ✅ **shipped in v0.3**
 - Context-budget meter — surfaces the #1 unsolved MCP pain ("tool defs ate 72% of my context") ✅ **Tools tab**
-- Single-binary distribution via Homebrew tap + curl-pipe-sh installer (Plan 04)
+- Single-binary distribution via Homebrew tap + curl-pipe-sh installer
 
 ---
 
@@ -172,8 +172,12 @@ The TUI (Bubble Tea, k9s-style) lands in **Plan 03** — see [the design spec](d
 
 ---
 
-## What works in v0.3
+## What works in v1.0
 
+- ✅ `mcp-gateway init` — first-run wizard: detects Claude Desktop / Cursor configs, migrates servers, patches the client to point at the gateway, installs the launchd auto-start service
+- ✅ Homebrew tap: `brew install ayu5h-raj/tap/mcp-gateway`
+- ✅ `install.sh` for non-brew (Linux + macOS), with SHA256 verification
+- ✅ `mcp-gateway service install | uninstall | status` — manages the launchd plist that auto-starts the daemon on login (macOS)
 - ✅ Aggregate N stdio MCP servers behind one endpoint
 - ✅ Streamable HTTP `POST /mcp` for HTTP-capable clients
 - ✅ Stdio bridge for Claude Desktop and other stdio-only clients
@@ -191,9 +195,10 @@ The TUI (Bubble Tea, k9s-style) lands in **Plan 03** — see [the design spec](d
 - ✅ **k9s-style TUI** — `mcp-gateway tui` with Servers / Events / Tools tabs, live via SSE + 2s polling
 - ✅ macOS + Linux
 
-## What's deferred (Plan 04 / later)
+## What's deferred to later versions
 
-- **Plan 04:** First-run wizard, launchd plist, goreleaser, Homebrew tap, install.sh
+- **v1.1:** Linux systemd unit (Linux v1.0 users run `mcp-gateway start` from their shell rc)
+- **v1.1:** macOS code signing / notarization (`install.sh` users see one Gatekeeper warning; documented workaround in Troubleshooting below)
 - **Later:** macOS Keychain (and Linux/Windows) secret backends — the parser is scheme-aware so adding `${keychain:NAME}` is non-breaking
 - **Later:** HTTP / SSE downstream MCP servers (currently stdio only)
 - **Later:** OAuth passthrough for remote MCPs (GitHub, Slack, Notion)
