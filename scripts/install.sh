@@ -5,6 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ayu5h-raj/mcp-gateway/main/scripts/install.sh | sh
 #   MCP_GATEWAY_VERSION=v1.0.0 sh install.sh
 #   MCP_GATEWAY_PREFIX=$HOME/.local/bin sh install.sh
+#   MCP_GATEWAY_BASE_URL=https://internal.mirror/mcp-gateway sh install.sh   # internal mirror
 
 set -eu
 
@@ -58,7 +59,7 @@ esac
 
 ARCHIVE="mcp-gateway-${OS}-${ARCH}-v${VERSION_NO_V}.tar.gz"
 CHECKSUMS="mcp-gateway_v${VERSION_NO_V}_checksums.txt"
-BASE_URL="https://github.com/${OWNER}/${REPO}/releases/download/${VERSION}"
+BASE_URL="${MCP_GATEWAY_BASE_URL:-https://github.com/${OWNER}/${REPO}/releases/download/${VERSION}}"
 
 info "Installing mcp-gateway ${VERSION} for ${OS}/${ARCH}..."
 
