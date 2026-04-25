@@ -128,6 +128,34 @@ func TestServersModel_EnterOpensDetail(t *testing.T) {
 	assert.Equal(t, "alpha", m.detail.server)
 }
 
+// Optimistic flip: pressing t/r mutates the row's State synchronously so the
+// user sees the action register before the next 2s admin poll. Without this,
+// `t` on a running server looks like a no-op for ~2s.
+func TestServersModel_ToggleAndRestartShowOptimisticState(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		key        string
+		initial    admin.ServerInfo
+		wantState  string
+	}{
+		{"toggle running→stopping", "t", admin.ServerInfo{Name: "a", State: "running", Enabled: true}, "stopping"},
+		{"toggle disabled→starting", "t", admin.ServerInfo{Name: "a", State: "disabled", Enabled: false}, "starting"},
+		{"restart→restarting", "r", admin.ServerInfo{Name: "a", State: "running", Enabled: true}, "restarting"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel()
+			m.serversView = m.serversView.withServers([]admin.ServerInfo{tc.initial})
+
+			next, cmd := m.Update(keyMsg(tc.key))
+			m = next.(model)
+			require.NotNil(t, cmd, "expected an admin action cmd to be issued")
+			require.Len(t, m.serversView.servers, 1)
+			assert.Equal(t, tc.wantState, m.serversView.servers[0].State,
+				"row state should flip immediately, not wait for next poll")
+		})
+	}
+}
+
 func TestMatchesFilter(t *testing.T) {
 	ev := event.Event{Kind: "mcp.request", Server: "kite", Method: "tools/list"}
 	assert.True(t, matchesFilter(ev, "kite"))
