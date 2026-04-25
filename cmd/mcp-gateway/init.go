@@ -44,7 +44,7 @@ func newInitCmd() *cobra.Command {
 			}
 			fmt.Println("mcp-gateway init — first-run wizard")
 			fmt.Println()
-			imported, importedFromClients, err := importStep(cfgPath, noImport, assumeYes)
+			imported, importedFromClients, err := importStep(cfgPath, gw, noImport, assumeYes)
 			if err != nil {
 				return err
 			}
@@ -120,20 +120,58 @@ type importedFromClient struct {
 	servers []string // names imported (for the patch step)
 }
 
-// stdioServers returns only those entries whose Command is set. HTTP/SSE
-// transport entries (which have no Command, only a url + headers) are
-// filtered out — mcp-gateway v1 only proxies stdio downstream servers.
-func stdioServers(in []clientcfg.Server) []clientcfg.Server {
+// skipReason returns a non-empty string explaining why s should be excluded
+// from import (and a friendly message printed in the discovery list), or
+// "" if s is a normal stdio server we can import.
+//
+// Filters two cases:
+//   - Empty Command: HTTP/SSE-transport entries (type:http with url+headers).
+//     mcp-gateway v1 only proxies stdio downstream servers.
+//   - Self-pointing Command: an entry whose Command resolves to the gateway
+//     binary itself. Almost always a previously-patched mcpServers entry from
+//     a prior `init` run; importing it would create a recursive supervisor →
+//     gateway → supervisor loop. Resolves symlinks on both sides because
+//     /opt/homebrew/bin/mcp-gateway is symlinked into the Cellar directory
+//     and the patched config records one path while os.Executable returns
+//     the other.
+func skipReason(s clientcfg.Server, gw, clientName string) string {
+	if s.Command == "" {
+		return fmt.Sprintf("(HTTP transport — not yet supported by mcp-gateway, leave in %s)", clientName)
+	}
+	if samePath(s.Command, gw) {
+		return "(self-pointing — already an mcp-gateway entry from a prior install, skipping)"
+	}
+	return ""
+}
+
+// samePath returns true when a and b refer to the same file on disk after
+// symlink resolution and normalization. Best-effort: any error in resolution
+// falls back to literal string comparison.
+func samePath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	resolveOrSelf := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	return resolveOrSelf(a) == resolveOrSelf(b)
+}
+
+// importableServers returns only the entries that survive skipReason.
+func importableServers(in []clientcfg.Server, gw, clientName string) []clientcfg.Server {
 	out := make([]clientcfg.Server, 0, len(in))
 	for _, s := range in {
-		if s.Command != "" {
+		if skipReason(s, gw, clientName) == "" {
 			out = append(out, s)
 		}
 	}
 	return out
 }
 
-func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromClient, error) {
+func importStep(cfgPath, gw string, noImport, assumeYes bool) (int, []importedFromClient, error) {
 	// Ensure the config directory exists. 0o700 — the file inside is 0o600
 	// (server env may carry secrets); the parent dir is consistent with that.
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
@@ -166,14 +204,8 @@ func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromCl
 					continue
 				}
 				for _, s := range d.Servers {
-					if s.Command == "" {
-						// Almost certainly an HTTP/SSE-transport entry
-						// (type: http with url + headers). mcp-gateway v1
-						// only proxies stdio downstream servers; surface
-						// the entry as unsupported so the user knows
-						// nothing is silently dropped, and leave it in
-						// the client's own config.
-						fmt.Printf("      %-15s — (HTTP transport — not yet supported by mcp-gateway, leave in %s)\n", s.Name, d.Client.Name)
+					if reason := skipReason(s, gw, d.Client.Name); reason != "" {
+						fmt.Printf("      %-15s — %s\n", s.Name, reason)
 						continue
 					}
 					argsStr := ""
@@ -188,16 +220,16 @@ func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromCl
 				if d.Err != nil || len(d.Servers) == 0 {
 					continue
 				}
-				supported := stdioServers(d.Servers)
-				if len(supported) == 0 {
+				importable := importableServers(d.Servers, gw, d.Client.Name)
+				if len(importable) == 0 {
 					continue
 				}
-				prompt := fmt.Sprintf("Import %d server(s) from %s?", len(supported), d.Client.Name)
+				prompt := fmt.Sprintf("Import %d server(s) from %s?", len(importable), d.Client.Name)
 				if !confirm(prompt, true, assumeYes) {
 					continue
 				}
-				names := make([]string, 0, len(supported))
-				for _, s := range supported {
+				names := make([]string, 0, len(importable))
+				for _, s := range importable {
 					if _, exists := cfg.MCPServers[s.Name]; exists {
 						fmt.Printf("  ⚠ skipping %s (already in config)\n", s.Name)
 						continue
@@ -300,7 +332,14 @@ func serviceStep(gw string, assumeYes bool) error {
 		return nil
 	}
 	if err := service.Install(gw); err != nil {
-		return fmt.Errorf("service install: %w", err)
+		// Non-fatal: the wizard already wrote the config and patched the
+		// client(s); failing the whole `init` here would leave the user
+		// thinking nothing worked. Print the error + the workaround and
+		// let the footer remind them how to use the daemon.
+		fmt.Printf("  ⚠ service install failed: %v\n", err)
+		fmt.Println("  The config is written and the daemon is otherwise fine — just no auto-start.")
+		fmt.Println("  Run `mcp-gateway start` to start it now, then `mcp-gateway service install` later to retry auto-start.")
+		return nil
 	}
 	fmt.Println("  ✓ launchd service installed and loaded")
 	return nil

@@ -99,3 +99,25 @@ brews:
       bin.install "mgw-smoke"
     test: |
       assert_match "mcp-gateway", shell_output("#{bin}/mcp-gateway --version")
+    caveats: |
+      First-run wizard:
+        mcp-gateway init
+
+      Useful commands once installed:
+        mcp-gateway tui              live ops dashboard
+        mcp-gateway list             show servers + tool counts
+        mcp-gateway service status   inspect the launchd auto-start service
+
+      `mcp-gateway init` can install a launchd plist so the daemon auto-starts
+      on login. `brew uninstall` will automatically tear down that plist via the
+      uninstall preflight, but it WILL NOT delete `~/.mcp-gateway/` (your config
+      and logs). Remove it manually if you no longer want it:
+        rm -rf ~/.mcp-gateway
+    custom_block: |
+      uninstall_preflight do
+        # Tear down the launchd plist before the binary disappears.
+        # `service uninstall` is idempotent: a no-op if the user never ran
+        # `mcp-gateway service install`. We swallow errors so a partially
+        # broken install never blocks brew from removing the binary.
+        system "#{bin}/mcp-gateway", "service", "uninstall" rescue nil
+      end

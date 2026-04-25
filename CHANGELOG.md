@@ -6,6 +6,17 @@ All notable changes to mcp-gateway are documented here. Versions follow [SemVer]
 
 (Nothing here yet.)
 
+## [1.0.3] — 2026-04-25
+
+### Fixed
+- `mcp-gateway init` no longer imports an entry whose `command` resolves to the gateway binary itself. Re-running `init` against a previously-patched client config used to surface the `mcp-gateway` entry as importable, which produced a recursive supervisor → gateway → supervisor chain (visible in the TUI as `servers=1, tools=0` forever). Self-pointing entries are now flagged `(self-pointing — already an mcp-gateway entry from a prior install, skipping)`.
+- `mcp-gateway service install` now waits 250ms after `launchctl bootout` and retries `launchctl bootstrap` up to 3 times when the post-bootout race produces `Bootstrap failed: 5: Input/output error` or "service is already loaded". The bootout/bootstrap pair is now reliably idempotent.
+- `mcp-gateway init`'s service-install step is no longer fatal: if `launchctl bootstrap` fails after the retries, the wizard prints a clear workaround (`mcp-gateway start` to run the daemon now, `mcp-gateway service install` to retry auto-start later) and the config + client-patch work performed earlier in the wizard is preserved.
+- The launchctl-bootstrap error message no longer suggests `Try re-running as root` (launchctl's own misleading default for per-user gui plists). Replaced with: `this is a per-user gui/<uid> plist; sudo will not help.`
+
+### Changed
+- Homebrew formula now includes a `caveats` block (printed after `brew install`) summarizing `mcp-gateway init` and the launchd-service lifecycle, plus an `uninstall_preflight` hook that automatically runs `mcp-gateway service uninstall` so `brew uninstall` cleanly tears down the launchd plist. Existing data at `~/.mcp-gateway/` is intentionally left untouched on uninstall (config + logs); the caveats text says so explicitly.
+
 ## [1.0.2] — 2026-04-25
 
 ### Fixed

@@ -86,8 +86,13 @@ func Install(gatewayBinary string) error {
 	}
 
 	// If a previous version is loaded, bootout first (silent on failure).
+	// Then give launchd a moment to actually tear down the service session
+	// before bootstrapping a new one — bootout returns synchronously but
+	// launchd processes the teardown asynchronously, so an immediate
+	// bootstrap can race and fail with "Input/output error" (errno 5).
 	uid := strconv.Itoa(os.Getuid())
 	_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+Label).Run()
+	time.Sleep(250 * time.Millisecond)
 
 	tmp, err := os.CreateTemp(dir, ".plist.tmp.*")
 	if err != nil {
@@ -112,11 +117,32 @@ func Install(gatewayBinary string) error {
 		return fmt.Errorf("rename: %w", err)
 	}
 
-	out, err := exec.Command("launchctl", "bootstrap", "gui/"+uid, path).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("launchctl bootstrap: %w (output: %s)", err, out)
+	// Bootstrap with retry on transient post-bootout errors. launchd's
+	// "Input/output error" (errno 5) and "service is already loaded"
+	// (errno 37) both surface when the previous bootout hasn't fully
+	// settled; both clear within a few hundred ms. Permanent errors
+	// (bad plist, no permissions) also produce non-zero — we still try
+	// twice in case the first attempt hit a coincidental I/O blip, then
+	// give up with a useful annotation.
+	const attempts = 3
+	var lastOut []byte
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		out, err := exec.Command("launchctl", "bootstrap", "gui/"+uid, path).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		lastOut, lastErr = out, err
+		if i < attempts-1 {
+			time.Sleep(time.Duration(250*(i+1)) * time.Millisecond)
+		}
 	}
-	return nil
+	return fmt.Errorf(
+		"launchctl bootstrap failed after %d attempts: %w (output: %s) — "+
+			"this is a per-user gui/%s plist; sudo will not help. "+
+			"Check the daemon log at ~/.mcp-gateway/daemon.log if launchd did manage to spawn it",
+		attempts, lastErr, lastOut, uid,
+	)
 }
 
 // Uninstall runs `launchctl bootout` and removes the plist file. Both
