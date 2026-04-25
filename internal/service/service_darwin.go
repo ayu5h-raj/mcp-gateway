@@ -3,12 +3,47 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 )
+
+// fallbackPath is the safe baseline used when the user's login shell can't
+// be probed. Covers Apple Silicon Homebrew, Intel Homebrew, and the system
+// dirs — but NOT user-managed Node/Python installs (nvm, asdf, mise, etc).
+const fallbackPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+// userLoginPath returns the PATH a child process would inherit if launched
+// from the user's login shell. Captures nvm/asdf/mise installs that aren't
+// in standard system locations, so child MCP servers like `npx` resolve
+// when the daemon is launched by launchd (which has a minimal env).
+//
+// Falls back to fallbackPath on any error or empty output. Bounded by 5s.
+func userLoginPath() string {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		return fallbackPath
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// -l = login shell (sources .zprofile / .bash_profile / etc.).
+	// Some shells require an interactive flag to source rc files; -l alone
+	// gets the user's PATH via login profile, which is what we want.
+	out, err := exec.CommandContext(ctx, shell, "-l", "-c", "echo $PATH").Output()
+	if err != nil {
+		return fallbackPath
+	}
+	got := strings.TrimSpace(string(out))
+	if got == "" {
+		return fallbackPath
+	}
+	return got
+}
 
 // Install renders the plist using gatewayBinary, writes it atomically,
 // and runs `launchctl bootstrap`. Idempotent: replaces existing plist
@@ -35,6 +70,7 @@ func Install(gatewayBinary string) error {
 	body, err := render(renderArgs{
 		GatewayBinary: gatewayBinary,
 		LogFile:       logFile,
+		LoginPath:     userLoginPath(),
 	})
 	if err != nil {
 		return fmt.Errorf("render: %w", err)

@@ -15,6 +15,7 @@ func TestRender_HasExpectedFields(t *testing.T) {
 	out, err := render(renderArgs{
 		GatewayBinary: "/usr/local/bin/mcp-gateway",
 		LogFile:       "/Users/test/.mcp-gateway/daemon.log",
+		LoginPath:     "/Users/test/.nvm/versions/node/v24/bin:/opt/homebrew/bin:/usr/bin:/bin",
 	})
 	if err != nil {
 		t.Fatalf("render: %v", err)
@@ -26,6 +27,8 @@ func TestRender_HasExpectedFields(t *testing.T) {
 		"<key>KeepAlive</key><true/>",
 		"<key>RunAtLoad</key><true/>",
 		"<string>/Users/test/.mcp-gateway/daemon.log</string>",
+		// LoginPath snapshot must end up in the plist's PATH env var.
+		"<key>PATH</key><string>/Users/test/.nvm/versions/node/v24/bin:/opt/homebrew/bin:/usr/bin:/bin</string>",
 	}
 	for _, c := range checks {
 		if !strings.Contains(out, c) {

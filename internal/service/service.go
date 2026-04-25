@@ -28,6 +28,10 @@ var plistTmpl string
 type renderArgs struct {
 	GatewayBinary string
 	LogFile       string
+	// LoginPath is the colon-separated PATH the daemon should run with —
+	// snapshot of the user's login-shell PATH at install time. Captures
+	// nvm/asdf/mise/etc. so child MCP servers (like `npx`) can be located.
+	LoginPath string
 }
 
 func render(a renderArgs) (string, error) {

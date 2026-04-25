@@ -6,6 +6,11 @@ All notable changes to mcp-gateway are documented here. Versions follow [SemVer]
 
 (Nothing here yet.)
 
+## [1.0.2] — 2026-04-25
+
+### Fixed
+- `mcp-gateway service install` now snapshots the user's actual login-shell PATH into the launchd plist instead of hardcoding `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`. Previously, child MCP servers spawned by the launchd-launched daemon could not find binaries installed via nvm, asdf, mise, or pyenv (e.g. `npx` from a node version manager). Re-run `mcp-gateway service uninstall && mcp-gateway service install` after upgrading to pick up the fix on an existing install.
+
 ## [1.0.1] — 2026-04-25
 
 ### Fixed
