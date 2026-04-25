@@ -6,6 +6,14 @@ All notable changes to mcp-gateway are documented here. Versions follow [SemVer]
 
 (Nothing here yet.)
 
+## [1.0.4] — 2026-04-25
+
+### Fixed
+- v1.0.3's Homebrew formula was unusable — it included an `uninstall_preflight` block, which is a Cask-only Homebrew method (Formulae don't have it). `brew install ayu5h-raj/tap/mcp-gateway` errored with `undefined method 'uninstall_preflight'`. v1.0.4 drops the broken block and instead spells out the correct uninstall order in the `caveats` block printed after `brew install`.
+
+### Notes
+- A real auto-uninstall hook for Formulae would require either repackaging as a Homebrew Cask or shipping a top-level `mcp-gateway uninstall` subcommand. Both are larger changes; deferring.
+
 ## [1.0.3] — 2026-04-25
 
 ### Fixed
