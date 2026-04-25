@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -32,7 +33,7 @@ func newInitCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				cfgPath = filepath.Join(home, ".mcp-gateway", "config.jsonc")
+				cfgPath = config.DefaultConfigPath(home)
 			}
 			gw, err := resolveGatewayBinary()
 			if err != nil {
@@ -92,7 +93,7 @@ func refuseIfConfigured(cfgPath string, force bool) error {
 		return fmt.Errorf("existing config at %s is unparseable: %w (use --force to overwrite)", cfgPath, err)
 	}
 	if len(cfg.MCPServers) > 0 {
-		return fmt.Errorf("mcp-gateway is already configured at %s with %d server(s). Use --force to overwrite, or `mcp-gateway add` to add more", cfgPath, len(cfg.MCPServers))
+		return fmt.Errorf("mcp-gateway is already configured at %s with %d server(s). Use --force to overwrite (resets daemon settings too), or `mcp-gateway add` to add more", cfgPath, len(cfg.MCPServers))
 	}
 	return nil
 }
@@ -120,20 +121,16 @@ type importedFromClient struct {
 }
 
 func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromClient, error) {
-	// Ensure the config directory exists.
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+	// Ensure the config directory exists. 0o700 — the file inside is 0o600
+	// (server env may carry secrets); the parent dir is consistent with that.
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
 		return 0, nil, fmt.Errorf("mkdir config dir: %w", err)
 	}
-	// Build the new Config.
+	// Build the new Config from the canonical defaults so future bumps to
+	// config.DefaultDaemon() flow through the wizard automatically.
 	cfg := &config.Config{
-		Version: 1,
-		Daemon: config.Daemon{
-			HTTPPort:                      7823,
-			LogLevel:                      "info",
-			EventBufferSize:               10000,
-			ChildRestartBackoffMaxSeconds: 60,
-			ChildRestartMaxAttempts:       5,
-		},
+		Version:    config.Version,
+		Daemon:     config.DefaultDaemon(),
 		MCPServers: map[string]config.Server{},
 	}
 	var importedClients []importedFromClient
@@ -158,7 +155,7 @@ func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromCl
 				for _, s := range d.Servers {
 					argsStr := ""
 					if len(s.Args) > 0 {
-						argsStr = " " + joinArgs(s.Args)
+						argsStr = " " + strings.Join(s.Args, " ")
 					}
 					fmt.Printf("      %-15s — %s%s\n", s.Name, s.Command, argsStr)
 				}
@@ -203,6 +200,10 @@ func importStep(cfgPath string, noImport, assumeYes bool) (int, []importedFromCl
 	return totalImported, importedClients, nil
 }
 
+// writeFreshConfig writes cfg to path atomically, mirroring the
+// internal/configwrite pattern: validate → write → chmod-on-handle →
+// sync → close → rename. Sync ensures the bytes hit disk before the
+// rename publishes the new file (prevents partial-config-on-crash).
 func writeFreshConfig(path string, cfg *config.Config) error {
 	if err := config.Validate(cfg); err != nil {
 		return fmt.Errorf("validate: %w", err)
@@ -215,34 +216,29 @@ func writeFreshConfig(path string, cfg *config.Config) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".config.tmp.*")
 	if err != nil {
-		return err
+		return fmt.Errorf("tempfile: %w", err)
 	}
 	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once Rename succeeds
 	if _, err := tmp.Write(body); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
+		return fmt.Errorf("write: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return err
+		return fmt.Errorf("close: %w", err)
 	}
-	if err := os.Chmod(tmpName, 0o600); err != nil {
-		_ = os.Remove(tmpName)
-		return err
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
 	}
-	return os.Rename(tmpName, path)
-}
-
-func joinArgs(args []string) string {
-	out := ""
-	for i, a := range args {
-		if i > 0 {
-			out += " "
-		}
-		out += a
-	}
-	return out
+	return nil
 }
 
 func patchStep(imported []importedFromClient, gw string, assumeYes bool) error {
