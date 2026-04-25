@@ -4,17 +4,17 @@ import "github.com/charmbracelet/lipgloss"
 
 // Palette — tuned for dark terminals (which is ~all of them).
 var (
-	colAccent    = lipgloss.Color("39")  // cyan — primary accent
-	colBorder    = lipgloss.Color("238") // dim grey — panel borders
-	colFg        = lipgloss.Color("252") // near-white
-	colFgMuted   = lipgloss.Color("244")
-	colFgDim     = lipgloss.Color("240")
-	colOK        = lipgloss.Color("42")  // green
-	colWarn      = lipgloss.Color("214") // orange
-	colErr       = lipgloss.Color("203") // red
-	colErrBg     = lipgloss.Color("52")  // dark red bg for banner
-	colStatusBg  = lipgloss.Color("237") // statusline background
-	colBlack     = lipgloss.Color("0")
+	colAccent   = lipgloss.Color("39")  // cyan — primary accent
+	colBorder   = lipgloss.Color("238") // dim grey — panel borders
+	colFg       = lipgloss.Color("252") // near-white
+	colFgMuted  = lipgloss.Color("244")
+	colFgDim    = lipgloss.Color("240")
+	colOK       = lipgloss.Color("42")  // green
+	colWarn     = lipgloss.Color("214") // orange
+	colErr      = lipgloss.Color("203") // red
+	colErrBg    = lipgloss.Color("52")  // dark red bg for banner
+	colStatusBg = lipgloss.Color("237") // statusline background
+	colBlack    = lipgloss.Color("0")
 )
 
 // Panel wraps the main content area with a rounded border.
