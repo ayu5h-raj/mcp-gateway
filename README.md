@@ -245,6 +245,44 @@ The repo ships with [`docs/superpowers/`](docs/superpowers/) — the original de
 
 ---
 
+## Uninstall
+
+```sh
+mcp-gateway service uninstall      # remove the launchd plist
+brew uninstall mcp-gateway          # or: rm /usr/local/bin/mcp-gateway /usr/local/bin/mgw-smoke
+rm -rf ~/.mcp-gateway               # config + logs + pidfile
+```
+
+Each step is idempotent. `service uninstall` on a never-installed system is a no-op.
+
+## Service management (macOS)
+
+mcp-gateway can install a launchd plist so the daemon auto-starts on login and respawns if it crashes.
+
+```sh
+mcp-gateway service install     # generate plist + launchctl bootstrap
+mcp-gateway service status      # show installed / loaded / pid
+mcp-gateway service uninstall   # bootout + remove plist
+```
+
+The plist label is `com.ayu5h-raj.mcp-gateway`. Logs go to `~/.mcp-gateway/daemon.log`. Edit the plist directly if you need a custom PATH or working dir; reinstall to pick up changes.
+
+Linux: deferred to v1.1. For now, run `mcp-gateway start` from your shell rc.
+
+## Troubleshooting
+
+**macOS Gatekeeper warning** ("cannot be opened because the developer cannot be verified"). Affects only the `install.sh` path; `brew` users are unaffected. Fix:
+
+```sh
+xattr -d com.apple.quarantine /usr/local/bin/mcp-gateway /usr/local/bin/mgw-smoke
+```
+
+**Daemon log:** `~/.mcp-gateway/daemon.log` (or whatever `StandardOutPath` your plist points at).
+
+**File an issue:** https://github.com/ayu5h-raj/mcp-gateway/issues
+
+---
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
