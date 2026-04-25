@@ -97,21 +97,26 @@ func newServiceStatusCmd() *cobra.Command {
 	}
 }
 
-// resolveGatewayBinary returns the absolute, symlink-resolved path of the
-// running mcp-gateway binary. This is what we want in the plist so the
-// service keeps working even if PATH changes.
+// resolveGatewayBinary returns the absolute path of the running mcp-gateway
+// binary as launched (NOT symlink-resolved). This is what we want in the
+// launchd plist and in patched client configs so the path keeps working
+// across `brew upgrade` — Homebrew bumps the
+// /opt/homebrew/bin/mcp-gateway symlink to the new Cellar dir on every
+// upgrade, but the old Cellar dir is removed. EvalSymlinks-ing here would
+// pin patched configs to the now-deleted Cellar/<old-version>/ path.
+//
+// Stable across upgrades for:
+//   - Homebrew  (/opt/homebrew/bin/mcp-gateway → Cellar/X.Y.Z/bin/mcp-gateway)
+//   - install.sh (/usr/local/bin/mcp-gateway, no symlink)
+//   - source build (./bin/mcp-gateway, absolute → user's choice to keep)
 func resolveGatewayBinary() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("os.Executable: %w", err)
 	}
-	resolved, err := filepath.EvalSymlinks(exe)
+	abs, err := filepath.Abs(exe)
 	if err != nil {
 		return exe, nil // best-effort fallback
-	}
-	abs, err := filepath.Abs(resolved)
-	if err != nil {
-		return resolved, nil
 	}
 	return abs, nil
 }

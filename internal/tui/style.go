@@ -81,10 +81,16 @@ var (
 )
 
 // State-text styles (colored, used for server.state rendering).
+//
+// "starting", "restarting", "stopping" are also used as TUI-side optimistic
+// states: when the user presses t/r the row's state flips to one of these
+// immediately so the action visibly registers; the next admin poll
+// overwrites with the real daemon-side state within ~2s.
 var stateStyle = map[string]lipgloss.Style{
 	"running":    lipgloss.NewStyle().Foreground(colOK).Bold(true),
 	"starting":   lipgloss.NewStyle().Foreground(colWarn),
 	"restarting": lipgloss.NewStyle().Foreground(colWarn).Bold(true),
+	"stopping":   lipgloss.NewStyle().Foreground(colWarn).Bold(true),
 	"errored":    lipgloss.NewStyle().Foreground(colErr).Bold(true),
 	"disabled":   lipgloss.NewStyle().Foreground(colFgDim),
 	"stopped":    lipgloss.NewStyle().Foreground(colFgMuted),
@@ -95,6 +101,7 @@ var stateGlyphs = map[string]string{
 	"running":    lipgloss.NewStyle().Foreground(colOK).Render("●"),
 	"starting":   lipgloss.NewStyle().Foreground(colWarn).Render("◐"),
 	"restarting": lipgloss.NewStyle().Foreground(colWarn).Render("◑"),
+	"stopping":   lipgloss.NewStyle().Foreground(colWarn).Render("◒"),
 	"errored":    lipgloss.NewStyle().Foreground(colErr).Render("!"),
 	"disabled":   lipgloss.NewStyle().Foreground(colFgDim).Render("○"),
 	"stopped":    lipgloss.NewStyle().Foreground(colFgMuted).Render("·"),

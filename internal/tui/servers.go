@@ -49,14 +49,21 @@ func (s serversModel) handleKey(m model, k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(s.servers) > 0 {
 			srv := s.servers[s.selected]
 			op := "enable"
+			pendingState := "starting"
 			if srv.Enabled {
 				op = "disable"
+				pendingState = "stopping"
 			}
+			// Optimistic state flip so the user sees the action register
+			// immediately rather than after the next 2s admin poll. The
+			// real state arrives in the next serversMsg and overwrites.
+			s.servers[s.selected].State = pendingState
 			m.serversView = s
 			return m, cmdAction(m.client, op, srv.Name)
 		}
 	case "r":
 		if len(s.servers) > 0 {
+			s.servers[s.selected].State = "restarting"
 			m.serversView = s
 			return m, cmdAction(m.client, "restart", s.servers[s.selected].Name)
 		}
