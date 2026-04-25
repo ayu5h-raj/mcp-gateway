@@ -6,6 +6,11 @@ All notable changes to mcp-gateway are documented here. Versions follow [SemVer]
 
 (Nothing here yet.)
 
+## [1.0.1] — 2026-04-25
+
+### Fixed
+- `mcp-gateway init` no longer aborts when an MCP client config contains an HTTP-transport server (e.g. `"type": "http"` entries with no `command`). Such entries are now flagged in the discovery list as `(HTTP transport — not yet supported, leave in <client>)`, the per-client import count reflects only stdio entries, and the patch step preserves the HTTP entries in the client's own config so they keep working natively. Native HTTP/SSE downstream support remains deferred to a later release.
+
 ## [1.0.0] — 2026-04-25
 
 ### Added
