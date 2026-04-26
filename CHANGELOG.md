@@ -6,6 +6,12 @@ All notable changes to mcp-gateway are documented here. Versions follow [SemVer]
 
 (Nothing here yet.)
 
+## [1.0.6] — 2026-04-26
+
+### Fixed
+- `mcp-gateway stop` against a launchd-managed daemon now refuses up front instead of pretending to time out. Pre-1.0.6, `stop` would SIGTERM the daemon, launchd would respawn it within milliseconds, and the post-kill check (which polled for the socket file's absence) would falsely report `daemon did not exit within 5s`. v1.0.6 detects launchd ownership via `launchctl print` matching the running pid and prints the correct command instead: `mcp-gateway service uninstall` (to remove auto-start) or `launchctl kickstart -k gui/$(id -u)/com.ayu5h-raj.mcp-gateway` (to restart in place). `mcp-gateway restart` carries the same guard.
+- `mcp-gateway stop` now polls the daemon's pid for death (`kill -0`) instead of polling for the socket file's absence. Socket-polling was a false positive against any auto-restart supervisor (launchd, systemd, even an out-of-band `mcp-gateway start &` in a wrapper script). The post-kill grace window grew from 5s → 10s to give the daemon room to drain its MCP children's stdio buffers (notably `npx mcp-remote` wrappers, which can take a few seconds to exit).
+
 ## [1.0.5] — 2026-04-25
 
 ### Fixed
